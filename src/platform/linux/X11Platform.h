@@ -44,6 +44,8 @@ public:
         }
     }
 
+    void clickMouse(int button, int count) override;
+
     Display* getDisplay() const { return display; }
 
 private:

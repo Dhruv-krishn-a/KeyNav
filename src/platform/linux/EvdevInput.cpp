@@ -58,25 +58,30 @@ void EvdevInput::destroyVirtualMouse() {
 void EvdevInput::setupVirtualMouse(int w, int h) {
     virtualMouseFd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
     if (virtualMouseFd < 0) {
-        std::cerr << "EvdevInput: Failed to open /dev/uinput for Mouse (Virtual mouse won't work)" << std::endl;
+        fprintf(stderr, "EvdevInput: ERROR: Failed to open /dev/uinput: %s\n", strerror(errno));
         return;
     }
 
-    ioctl(virtualMouseFd, UI_SET_EVBIT, EV_KEY);
-    ioctl(virtualMouseFd, UI_SET_KEYBIT, BTN_LEFT);
-    ioctl(virtualMouseFd, UI_SET_KEYBIT, BTN_RIGHT);
-    ioctl(virtualMouseFd, UI_SET_KEYBIT, BTN_MIDDLE);
+    // Declare event types
+    if (ioctl(virtualMouseFd, UI_SET_EVBIT, EV_SYN) < 0) fprintf(stderr, "EvdevInput: ERROR: UI_SET_EVBIT EV_SYN failed: %s\n", strerror(errno));
+    if (ioctl(virtualMouseFd, UI_SET_EVBIT, EV_KEY) < 0) fprintf(stderr, "EvdevInput: ERROR: UI_SET_EVBIT EV_KEY failed: %s\n", strerror(errno));
+    if (ioctl(virtualMouseFd, UI_SET_EVBIT, EV_ABS) < 0) fprintf(stderr, "EvdevInput: ERROR: UI_SET_EVBIT EV_ABS failed: %s\n", strerror(errno));
 
-    ioctl(virtualMouseFd, UI_SET_EVBIT, EV_ABS);
-    ioctl(virtualMouseFd, UI_SET_ABSBIT, ABS_X);
-    ioctl(virtualMouseFd, UI_SET_ABSBIT, ABS_Y);
+    // Declare specific buttons
+    if (ioctl(virtualMouseFd, UI_SET_KEYBIT, BTN_LEFT) < 0) fprintf(stderr, "EvdevInput: ERROR: UI_SET_KEYBIT BTN_LEFT failed: %s\n", strerror(errno));
+    if (ioctl(virtualMouseFd, UI_SET_KEYBIT, BTN_RIGHT) < 0) fprintf(stderr, "EvdevInput: ERROR: UI_SET_KEYBIT BTN_RIGHT failed: %s\n", strerror(errno));
+    if (ioctl(virtualMouseFd, UI_SET_KEYBIT, BTN_MIDDLE) < 0) fprintf(stderr, "EvdevInput: ERROR: UI_SET_KEYBIT BTN_MIDDLE failed: %s\n", strerror(errno));
+
+    // Declare specific absolute axes
+    if (ioctl(virtualMouseFd, UI_SET_ABSBIT, ABS_X) < 0) fprintf(stderr, "EvdevInput: ERROR: UI_SET_ABSBIT ABS_X failed: %s\n", strerror(errno));
+    if (ioctl(virtualMouseFd, UI_SET_ABSBIT, ABS_Y) < 0) fprintf(stderr, "EvdevInput: ERROR: UI_SET_ABSBIT ABS_Y failed: %s\n", strerror(errno));
 
     struct uinput_user_dev uidev;
     memset(&uidev, 0, sizeof(uidev));
     snprintf(uidev.name, UINPUT_MAX_NAME_SIZE, "KeyNav Virtual Mouse");
     uidev.id.bustype = BUS_USB;
-    uidev.id.vendor  = 0x1;
-    uidev.id.product = 0x1;
+    uidev.id.vendor  = 0x1234; // Using a more distinct vendor/product ID
+    uidev.id.product = 0x5678;
     uidev.id.version = 1;
 
     // Use inclusive absolute ranges [0..max], so max should be last valid pixel.
@@ -85,10 +90,16 @@ void EvdevInput::setupVirtualMouse(int w, int h) {
     uidev.absmin[ABS_Y] = 0;
     uidev.absmax[ABS_Y] = std::max(0, h - 1);
 
-    write(virtualMouseFd, &uidev, sizeof(uidev));
-    ioctl(virtualMouseFd, UI_DEV_CREATE);
+    if (write(virtualMouseFd, &uidev, sizeof(uidev)) < 0) {
+        fprintf(stderr, "EvdevInput: ERROR: Failed to write device info: %s\n", strerror(errno));
+        return;
+    }
+    if (ioctl(virtualMouseFd, UI_DEV_CREATE) < 0) {
+        fprintf(stderr, "EvdevInput: ERROR: Failed to create uinput device: %s\n", strerror(errno));
+        return;
+    }
     
-    std::cout << "EvdevInput: Virtual Mouse Created (" << w << "x" << h << " resolution)" << std::endl;
+    std::cout << "EvdevInput: Virtual Mouse device created successfully." << std::endl;
 }
 
 void EvdevInput::moveMouse(int x, int y, int screenW, int screenH) {
@@ -128,6 +139,54 @@ void EvdevInput::moveMouse(int x, int y, int screenW, int screenH) {
     ev.code = SYN_REPORT;
     ev.value = 0;
     write(virtualMouseFd, &ev, sizeof(ev));
+}
+
+void EvdevInput::clickMouse(int button, int count) {
+    if (virtualMouseFd < 0) {
+        std::cerr << "EvdevInput: Cannot click, virtual mouse FD is invalid!" << std::endl;
+        return;
+    }
+
+    int btnCode = BTN_LEFT;
+    if (button == 2) btnCode = BTN_MIDDLE;
+    else if (button == 3) btnCode = BTN_RIGHT;
+
+    std::cout << "EvdevInput: Virtual Click - Code: " << btnCode << " Count: " << count << std::endl;
+
+    struct input_event ev;
+    memset(&ev, 0, sizeof(ev));
+
+    for (int i = 0; i < count; ++i) {
+        // Press
+        ev.type = EV_KEY;
+        ev.code = btnCode;
+        ev.value = 1;
+        write(virtualMouseFd, &ev, sizeof(ev));
+
+        ev.type = EV_SYN;
+        ev.code = SYN_REPORT;
+        ev.value = 0;
+        write(virtualMouseFd, &ev, sizeof(ev));
+
+        // Add a small delay between press and release to simulate a real click
+        std::this_thread::sleep_for(std::chrono::milliseconds(40));
+
+        // Release
+        ev.type = EV_KEY;
+        ev.code = btnCode;
+        ev.value = 0;
+        write(virtualMouseFd, &ev, sizeof(ev));
+
+        ev.type = EV_SYN;
+        ev.code = SYN_REPORT;
+        ev.value = 0;
+        write(virtualMouseFd, &ev, sizeof(ev));
+
+        // If double-clicking, add a small pause between the clicks
+        if (count > 1 && i < count - 1) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    }
 }
 
 void EvdevInput::openDevices() {
@@ -300,9 +359,23 @@ void EvdevInput::eventLoop() {
                                 else if (code == KEY_BACKSPACE) {
                                     engine->onUndo();
                                 }
-                                else {
-                                    int keyIndex = -1;
-                                    switch(code) {
+                                else if (code == KEY_ENTER) {
+                                    engine->onClick(1, 1, true);
+                                }
+                                else if (code == KEY_SPACE) {
+                                    engine->onClick(1, 2, true);
+                                }
+                                                                else if (code == KEY_R) {
+                                                                    engine->onClick(3, 1, true);
+                                                                }
+                                                                else if (code == KEY_M) {
+                                                                    engine->onClick(2, 1, true);
+                                                                }
+                                                                else if (code == KEY_F) {
+                                                                    engine->onClick(1, 1, false);
+                                                                }
+                                                                else {
+                                                                    int keyIndex = -1;                                    switch(code) {
                                         case KEY_Q: keyIndex = 0; break;
                                         case KEY_W: keyIndex = 1; break;
                                         case KEY_E: keyIndex = 2; break;

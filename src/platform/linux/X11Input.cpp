@@ -89,6 +89,16 @@ void X11Input::handleEvent(XEvent& event) {
             engine->onKeyPress(key - XK_1); // 0-8
         } else if (key == XK_BackSpace) {
             engine->onUndo();
+        } else if (key == XK_Return) {
+            engine->onClick(1, 1, true); // Left click, single, close
+        } else if (key == XK_space) {
+            engine->onClick(1, 2, true); // Left click, double, close
+        } else if (key == XK_r) {
+            engine->onClick(3, 1, true); // Right click, single, close
+        } else if (key == XK_m) {
+            engine->onClick(2, 1, true); // Middle click, single, close
+        } else if (key == XK_f) {
+            engine->onClick(1, 1, false); // Left click, single, STAY
         }
         // Swallow other keys
     } 

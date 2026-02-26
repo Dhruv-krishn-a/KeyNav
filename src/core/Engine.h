@@ -30,6 +30,7 @@ public:
     void onDeactivate(); 
     void onKeyPress(int keyIndex); // 0-8 for cells 1-9
     void onUndo(); 
+    void onClick(int button, int count, bool deactivate = true);
     void onExit(); // New exit method
     
     // Dependencies

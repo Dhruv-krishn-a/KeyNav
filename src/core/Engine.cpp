@@ -153,6 +153,36 @@ void Engine::onUndo() {
     platform->moveCursor(centerX, centerY);
 }
 
+void Engine::onClick(int button, int count, bool deactivate) {
+    if (!state.active) return;
+
+    std::cout << "Engine: Click Request - Button: " << button << " Count: " << count << std::endl;
+
+    bool shouldReShow = !deactivate;
+    if (overlay) {
+        overlay->hide();
+    }
+
+    // Move cursor to center before clicking
+    int centerX = (int)(state.currentRect.x + state.currentRect.w / 2);
+    int centerY = (int)(state.currentRect.y + state.currentRect.h / 2);
+    platform->moveCursor(centerX, centerY);
+
+    // Perform click
+    platform->clickMouse(button, count);
+
+    if (shouldReShow && overlay) {
+        overlay->show();
+    }
+    
+    if (deactivate) {
+        // Small delay to ensure the OS/Application processes the click 
+        // before we ungrab the keyboard and hide the overlay.
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        onDeactivate();
+    }
+}
+
 void Engine::updateOverlay() {
     overlay->updateGrid(state.gridRows, state.gridCols, 
                         state.currentRect.x, state.currentRect.y, 

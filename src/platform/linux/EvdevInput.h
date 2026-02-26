@@ -29,6 +29,7 @@ private:
     // Virtual Mouse for Wayland support
     void setupVirtualMouse(int w, int h);
     void moveMouse(int x, int y, int screenW, int screenH) override;
+    void clickMouse(int button, int count) override;
     void destroyVirtualMouse();
 
     Engine* engine;

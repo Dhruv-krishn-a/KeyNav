@@ -11,6 +11,7 @@ public:
     
     // Optional virtual mouse support (for Wayland/Evdev)
     virtual void moveMouse(int x, int y, int screenW, int screenH) {}
+    virtual void clickMouse(int button, int count) {}
     // ... other methods to send keycodes to engine
 };
 

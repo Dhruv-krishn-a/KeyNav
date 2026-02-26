@@ -156,6 +156,19 @@ void X11Platform::getScreenSize(int& w, int& h) {
     h = DisplayHeight(display, screen);
 }
 
+void X11Platform::clickMouse(int button, int count) {
+    if (useEvdev && input) {
+        input->clickMouse(button, count);
+    } else {
+        // X11 button mapping: 1=Left, 2=Middle, 3=Right
+        for (int i = 0; i < count; ++i) {
+            XTestFakeButtonEvent(display, button, True, CurrentTime);
+            XTestFakeButtonEvent(display, button, False, CurrentTime);
+        }
+        XFlush(display);
+    }
+}
+
 void X11Platform::releaseModifiers() {
     // Release Alt and Ctrl keys via XTest to ensure no stuck modifiers
     // This is especially needed after an evdev grab which may have masked release events.
