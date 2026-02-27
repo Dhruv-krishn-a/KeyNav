@@ -12,9 +12,10 @@ Engine::Engine() {}
 Engine::~Engine() {}
 
 void Engine::initialize() {
-    state.active = false;
-    state.gridRows = 3;
-    state.gridCols = 3;
+    state.mode = EngineMode::Inactive;
+    state.gridRows = 11;
+    state.gridCols = 11;
+    state.recursionDepth = 0;
 }
 
 void Engine::run() {
@@ -24,9 +25,13 @@ void Engine::run() {
 }
 
 void Engine::onActivate() {
-    if (state.active) return;
+    if (state.mode != EngineMode::Inactive) return;
     
-    state.active = true;
+    state.mode = EngineMode::Level0_FirstChar;
+    state.firstChar = '\0';
+    state.gridRows = 11;
+    state.gridCols = 11;
+    state.recursionDepth = 0;
 
     // Start with full root-screen rect.
     int w, h;
@@ -36,8 +41,7 @@ void Engine::onActivate() {
 
     overlay->show();
 
-    // Overlay geometry can settle asynchronously (especially on Wayland/Xwayland).
-    // Sample a few times and pick the largest stable bounds.
+    // Overlay geometry can settle asynchronously
     Rect bestBounds = state.currentRect;
     double bestArea = bestBounds.w * bestBounds.h;
     for (int i = 0; i < 12; ++i) {
@@ -56,8 +60,6 @@ void Engine::onActivate() {
         return std::abs(a - b) <= eps;
     };
 
-    // Accept the sampled bounds when they plausibly represent a monitor region.
-    // Reject centered/partial transient geometries that cause visible margins.
     const double fullArea = state.currentRect.w * state.currentRect.h;
     const double areaRatio = (fullArea > 0.0) ? (bestArea / fullArea) : 0.0;
     const bool touchesXEdge = nearValue(bestBounds.x, 0.0, 3.0) ||
@@ -69,7 +71,6 @@ void Engine::onActivate() {
         state.currentRect = bestBounds;
     }
 
-    // Final edge snapping to avoid 1-2px border slivers.
     if (std::abs(state.currentRect.x) <= 2.0) state.currentRect.x = 0.0;
     if (std::abs(state.currentRect.y) <= 2.0) state.currentRect.y = 0.0;
     if (std::abs((state.currentRect.x + state.currentRect.w) - w) <= 2.0) {
@@ -79,9 +80,7 @@ void Engine::onActivate() {
         state.currentRect.h = (double)h - state.currentRect.y;
     }
 
-    overlay->updateGrid(state.gridRows, state.gridCols,
-                        state.currentRect.x, state.currentRect.y,
-                        state.currentRect.w, state.currentRect.h);
+    updateOverlay();
 
     input->grabKeyboard();
     platform->releaseModifiers();
@@ -89,10 +88,10 @@ void Engine::onActivate() {
 }
 
 void Engine::onDeactivate() {
-    if (!state.active) return;
+    if (state.mode == EngineMode::Inactive) return;
     
     std::cout << "Engine: Deactivating..." << std::endl;
-    state.active = false;
+    state.mode = EngineMode::Inactive;
     overlay->hide();
     input->ungrabKeyboard();
     platform->releaseModifiers();
@@ -100,7 +99,7 @@ void Engine::onDeactivate() {
 }
 
 void Engine::onExit() {
-    if (state.active) {
+    if (state.mode != EngineMode::Inactive) {
         onDeactivate();
     } else {
         platform->releaseModifiers();
@@ -110,76 +109,151 @@ void Engine::onExit() {
     }
 }
 
-void Engine::onKeyPress(int keyIndex) {
-    if (!state.active) return;
+void Engine::onChar(char c, bool shiftPressed) {
+    if (state.mode == EngineMode::Inactive) return;
     
-    int r = keyIndex / state.gridCols;
-    int c = keyIndex % state.gridCols;
-    
-    double cellW = state.currentRect.w / state.gridCols;
-    double cellH = state.currentRect.h / state.gridRows;
-    
-    // Prevent infinite recursion
-    if (cellW < 1.0 || cellH < 1.0) return;
+    if (c >= 'A' && c <= 'Z') {
+        c = c + ('a' - 'A');
+    }
 
-    // Push history
-    state.history.push_back(state.currentRect);
-    
-    // Update current rect
-    state.currentRect.x += c * cellW;
-    state.currentRect.y += r * cellH;
-    state.currentRect.w = cellW;
-    state.currentRect.h = cellH;
-    
-    updateOverlay();
-    
-    // Move cursor to center
-    int centerX = (int)(state.currentRect.x + state.currentRect.w / 2);
-    int centerY = (int)(state.currentRect.y + state.currentRect.h / 2);
-    platform->moveCursor(centerX, centerY);
+    if (state.mode == EngineMode::Level0_FirstChar) {
+        if (c >= 'a' && c < 'a' + state.gridRows) {
+            state.firstChar = c;
+            state.mode = EngineMode::Level0_SecondChar;
+        }
+    } 
+    else if (state.mode == EngineMode::Level0_SecondChar) {
+        if (c >= 'a' && c < 'a' + state.gridCols) {
+            int r = state.firstChar - 'a';
+            int col = c - 'a';
+            
+            double cellW = state.currentRect.w / state.gridCols;
+            double cellH = state.currentRect.h / state.gridRows;
+            
+            state.history.push_back(state.currentRect);
+
+            state.currentRect.x += col * cellW;
+            state.currentRect.y += r * cellH;
+            state.currentRect.w = cellW;
+            state.currentRect.h = cellH;
+            
+            int cursorX = (int)(state.currentRect.x + state.currentRect.w / 2);
+            int cursorY = (int)(state.currentRect.y + state.currentRect.h / 2);
+            platform->moveCursor(cursorX, cursorY);
+            
+            // Switch to 6x6 recursive mode
+            state.gridRows = 6;
+            state.gridCols = 6;
+            state.mode = EngineMode::Level1_Recursive;
+            state.recursionDepth = 0;
+            updateOverlay();
+        }
+    }
+    else if (state.mode == EngineMode::Level1_Recursive) {
+        if (state.recursionDepth >= 1) {
+            return; // Stop recursion after 2nd iteration (1st selection from 6x6)
+        }
+
+        int index = -1;
+        if (c >= 'a' && c <= 'z') index = c - 'a';
+        else if (c >= '0' && c <= '9') index = 26 + (c - '0');
+        
+        if (index >= 0 && index < state.gridRows * state.gridCols) {
+            int r = index / state.gridCols;
+            int col = index % state.gridCols;
+            
+            double cellW = state.currentRect.w / state.gridCols;
+            double cellH = state.currentRect.h / state.gridRows;
+            
+            if (cellW < 1.0 || cellH < 1.0) return;
+
+            state.history.push_back(state.currentRect);
+
+            state.currentRect.x += col * cellW;
+            state.currentRect.y += r * cellH;
+            state.currentRect.w = cellW;
+            state.currentRect.h = cellH;
+            
+            int cursorX = (int)(state.currentRect.x + state.currentRect.w / 2);
+            int cursorY = (int)(state.currentRect.y + state.currentRect.h / 2);
+            platform->moveCursor(cursorX, cursorY);
+            
+            state.recursionDepth++;
+            updateOverlay();
+        }
+    }
+}
+
+void Engine::onKeyRelease(char c) {
+    // Not needed for this flow
+}
+
+void Engine::onControlKey(const std::string& key) {
+    if (state.mode == EngineMode::Inactive) return;
+
+    if (key == "space") {
+        onClick(1, 1, true); // Left click
+    } else if (key == "enter") {
+        onClick(3, 1, true); // Right click
+    } else if (key == "backspace") {
+        onUndo();
+    }
 }
 
 void Engine::onUndo() {
-    if (!state.active || state.history.empty()) return;
+    if (state.mode == EngineMode::Inactive) return;
     
-    state.currentRect = state.history.back();
-    state.history.pop_back();
-    
-    updateOverlay();
-    
-    // Move cursor to center of previous rect
-    int centerX = (int)(state.currentRect.x + state.currentRect.w / 2);
-    int centerY = (int)(state.currentRect.y + state.currentRect.h / 2);
-    platform->moveCursor(centerX, centerY);
+    if (state.mode == EngineMode::Level0_SecondChar) {
+        state.mode = EngineMode::Level0_FirstChar;
+        state.firstChar = '\0';
+    } 
+    else if (state.mode == EngineMode::Level1_Recursive) {
+        if (!state.history.empty()) {
+            state.currentRect = state.history.back();
+            state.history.pop_back();
+            state.recursionDepth--;
+            
+            // If we popped back to the initial full screen, revert to Level0 11x11
+            if (state.history.empty() || state.recursionDepth < 0) {
+                state.mode = EngineMode::Level0_FirstChar;
+                state.firstChar = '\0';
+                state.gridRows = 11;
+                state.gridCols = 11;
+                state.recursionDepth = 0;
+            }
+        }
+        
+        int cursorX = (int)(state.currentRect.x + state.currentRect.w / 2);
+        int cursorY = (int)(state.currentRect.y + state.currentRect.h / 2);
+        platform->moveCursor(cursorX, cursorY);
+        
+        updateOverlay();
+    }
 }
 
 void Engine::onClick(int button, int count, bool deactivate) {
-    if (!state.active) return;
+    if (state.mode == EngineMode::Inactive) return;
 
     std::cout << "Engine: Click Request - Button: " << button << " Count: " << count << std::endl;
 
-    bool shouldReShow = !deactivate;
-    if (overlay) {
-        overlay->hide();
-    }
-
-    // Move cursor to center before clicking
     int centerX = (int)(state.currentRect.x + state.currentRect.w / 2);
     int centerY = (int)(state.currentRect.y + state.currentRect.h / 2);
     platform->moveCursor(centerX, centerY);
 
-    // Perform click
+    if (deactivate) {
+        onDeactivate(); // Ungrabs the keyboard and hides overlay
+        // Critical: Give GTK/Wayland a moment to process the keyboard ungrab
+        // before we inject the mouse click, otherwise GTK ignores the click.
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    } else {
+        if (overlay) overlay->hide();
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
     platform->clickMouse(button, count);
 
-    if (shouldReShow && overlay) {
+    if (!deactivate && overlay) {
         overlay->show();
-    }
-    
-    if (deactivate) {
-        // Small delay to ensure the OS/Application processes the click 
-        // before we ungrab the keyboard and hide the overlay.
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
-        onDeactivate();
     }
 }
 

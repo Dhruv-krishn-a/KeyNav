@@ -2,6 +2,7 @@
 #define ENGINE_H
 
 #include <vector>
+#include <string>
 #include "Types.h"
 
 // Forward declarations
@@ -9,12 +10,21 @@ class Platform;
 class Overlay;
 class Input;
 
+enum class EngineMode {
+    Inactive,
+    Level0_FirstChar,
+    Level0_SecondChar,
+    Level1_Recursive
+};
+
 struct EngineState {
-    bool active = false;
+    EngineMode mode = EngineMode::Inactive;
     Rect currentRect;
     std::vector<Rect> history;
-    int gridRows = 3;
-    int gridCols = 3;
+    int gridRows = 10;
+    int gridCols = 10;
+    char firstChar = '\0';
+    int recursionDepth = 0;
 };
 
 class Engine {
@@ -28,10 +38,12 @@ public:
     // Callbacks from Platform/Input
     void onActivate(); 
     void onDeactivate(); 
-    void onKeyPress(int keyIndex); // 0-8 for cells 1-9
-    void onUndo(); 
+    void onChar(char c, bool shiftPressed);
+    void onKeyRelease(char c);
+    void onControlKey(const std::string& key);
+    void onUndo();
     void onClick(int button, int count, bool deactivate = true);
-    void onExit(); // New exit method
+    void onExit(); 
     
     // Dependencies
     void setPlatform(Platform* p) { platform = p; }
@@ -47,5 +59,4 @@ private:
     Input* input = nullptr;
     EngineState state;
 };
-
 #endif // ENGINE_H

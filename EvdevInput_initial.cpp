@@ -343,10 +343,6 @@ void EvdevInput::eventLoop() {
                             if (pressed) ctrlPressed = true;
                             else if (released) ctrlPressed = false;
                         }
-                        if (code == KEY_LEFTSHIFT || code == KEY_RIGHTSHIFT) {
-                            if (pressed) shiftPressed = true;
-                            else if (released) shiftPressed = false;
-                        }
 
                         // Logic
                         if (grabbed) {
@@ -361,43 +357,37 @@ void EvdevInput::eventLoop() {
                                     engine->onExit();
                                 }
                                 else if (code == KEY_BACKSPACE) {
-                                    engine->onControlKey("backspace");
+                                    engine->onUndo();
                                 }
                                 else if (code == KEY_ENTER) {
-                                    engine->onControlKey("enter");
+                                    engine->onClick(1, 1, true);
                                 }
                                 else if (code == KEY_SPACE) {
-                                    engine->onControlKey("space");
+                                    engine->onClick(1, 2, true);
                                 }
-                                else if (code == KEY_F) {
-                                    engine->onClick(1, 1, false); // Left click, STAY
+                                                                else if (code == KEY_R) {
+                                                                    engine->onClick(3, 1, true);
+                                                                }
+                                                                else if (code == KEY_M) {
+                                                                    engine->onClick(2, 1, true);
+                                                                }
+                                                                else if (code == KEY_F) {
+                                                                    engine->onClick(1, 1, false);
+                                                                }
+                                                                else {
+                                                                    int keyIndex = -1;                                    switch(code) {
+                                        case KEY_Q: keyIndex = 0; break;
+                                        case KEY_W: keyIndex = 1; break;
+                                        case KEY_E: keyIndex = 2; break;
+                                        case KEY_A: keyIndex = 3; break;
+                                        case KEY_S: keyIndex = 4; break;
+                                        case KEY_D: keyIndex = 5; break;
+                                        case KEY_Z: keyIndex = 6; break;
+                                        case KEY_X: keyIndex = 7; break;
+                                        case KEY_C: keyIndex = 8; break;
+                                    }
+                                    if (keyIndex != -1) engine->onKeyPress(keyIndex);
                                 }
-                            }
-                            
-                            char c = '\0';
-                            switch(code) {
-                                case KEY_A: c = 'a'; break; case KEY_B: c = 'b'; break;
-                                case KEY_C: c = 'c'; break; case KEY_D: c = 'd'; break;
-                                case KEY_E: c = 'e'; break; case KEY_F: c = 'f'; break;
-                                case KEY_G: c = 'g'; break; case KEY_H: c = 'h'; break;
-                                case KEY_I: c = 'i'; break; case KEY_J: c = 'j'; break;
-                                case KEY_K: c = 'k'; break; case KEY_L: c = 'l'; break;
-                                case KEY_M: c = 'm'; break; case KEY_N: c = 'n'; break;
-                                case KEY_O: c = 'o'; break; case KEY_P: c = 'p'; break;
-                                case KEY_Q: c = 'q'; break; case KEY_R: c = 'r'; break;
-                                case KEY_S: c = 's'; break; case KEY_T: c = 't'; break;
-                                case KEY_U: c = 'u'; break; case KEY_V: c = 'v'; break;
-                                case KEY_W: c = 'w'; break; case KEY_X: c = 'x'; break;
-                                case KEY_Y: c = 'y'; break; case KEY_Z: c = 'z'; break;
-                                case KEY_1: c = '1'; break; case KEY_2: c = '2'; break;
-                                case KEY_3: c = '3'; break; case KEY_4: c = '4'; break;
-                                case KEY_5: c = '5'; break; case KEY_6: c = '6'; break;
-                                case KEY_7: c = '7'; break; case KEY_8: c = '8'; break;
-                                case KEY_9: c = '9'; break; case KEY_0: c = '0'; break;
-                            }
-                            if (c != '\0') {
-                                if (pressed) engine->onChar(c, shiftPressed);
-                                else if (released) engine->onKeyRelease(c);
                             }
                         } else {
                             // Passive Monitoring (Activation)

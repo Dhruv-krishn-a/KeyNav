@@ -43,6 +43,7 @@ private:
     // Key state tracking
     bool altPressed = false;
     bool ctrlPressed = false;
+    bool shiftPressed = false;
 };
 
 #endif // EVDEVINPUT_H

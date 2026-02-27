@@ -76,29 +76,47 @@ void X11Input::handleEvent(XEvent& event) {
         std::cout << "Event: KeyPress " << event.xkey.keycode << " state: " << event.xkey.state << std::endl;
     }
 
-    // We only care about KeyPress for logic
-    if (event.type == KeyRelease) return;
-
     KeySym key = XLookupKeysym(&event.xkey, 0);
 
     // If keyboard is grabbed (Active Mode)
     if (keyboardGrabbed) {
-        if (key == XK_Escape) {
-            engine->onDeactivate();
-        } else if (key >= XK_1 && key <= XK_9) {
-            engine->onKeyPress(key - XK_1); // 0-8
-        } else if (key == XK_BackSpace) {
-            engine->onUndo();
-        } else if (key == XK_Return) {
-            engine->onClick(1, 1, true); // Left click, single, close
-        } else if (key == XK_space) {
-            engine->onClick(1, 2, true); // Left click, double, close
-        } else if (key == XK_r) {
-            engine->onClick(3, 1, true); // Right click, single, close
-        } else if (key == XK_m) {
-            engine->onClick(2, 1, true); // Middle click, single, close
-        } else if (key == XK_f) {
-            engine->onClick(1, 1, false); // Left click, single, STAY
+        bool pressed = (event.type == KeyPress);
+        bool released = (event.type == KeyRelease);
+
+        bool isAutoRepeat = false;
+        if (released && XEventsQueued(display, QueuedAfterReading)) {
+            XEvent nextEvent;
+            XPeekEvent(display, &nextEvent);
+            if (nextEvent.type == KeyPress && nextEvent.xkey.time == event.xkey.time && nextEvent.xkey.keycode == event.xkey.keycode) {
+                isAutoRepeat = true;
+            }
+        }
+
+        if (pressed) {
+            if (key == XK_Escape) {
+                engine->onDeactivate();
+            } else if (key == XK_BackSpace) {
+                engine->onControlKey("backspace");
+            } else if (key == XK_Return) {
+                engine->onControlKey("enter");
+            } else if (key == XK_space) {
+                engine->onControlKey("space");
+            } else if (key == XK_f) {
+                engine->onClick(1, 1, false); // Left click, STAY
+            } else if (key >= XK_a && key <= XK_z) {
+                bool shift = (event.xkey.state & ShiftMask) != 0;
+                engine->onChar('a' + (key - XK_a), shift);
+            } else if (key >= XK_A && key <= XK_Z) {
+                engine->onChar('a' + (key - XK_A), true);
+            } else if (key >= XK_0 && key <= XK_9) {
+                engine->onChar('0' + (key - XK_0), false);
+            }
+        } else if (released && !isAutoRepeat) {
+            if (key >= XK_a && key <= XK_z) {
+                engine->onKeyRelease('a' + (key - XK_a));
+            } else if (key >= XK_A && key <= XK_Z) {
+                engine->onKeyRelease('a' + (key - XK_A));
+            }
         }
         // Swallow other keys
     } 

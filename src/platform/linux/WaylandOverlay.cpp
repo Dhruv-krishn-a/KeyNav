@@ -38,12 +38,25 @@ Rgba tileColorForIndex(int index) {
     return palette[index % palette.size()];
 }
 
-std::string labelForIndex(int index) {
-    static const std::array<const char*, 9> labels = {{"Q", "W", "E", "A", "S", "D", "Z", "X", "C"}};
-    if (index >= 0 && index < (int)labels.size()) {
-        return labels[index];
+std::string labelForIndex(int index, int cols) {
+    if (cols == 6) {
+        if (index >= 0 && index < 26) {
+            char c = 'A' + index;
+            return std::string(1, c);
+        } else if (index >= 26 && index < 36) {
+            char c = '0' + (index - 26);
+            return std::string(1, c);
+        }
+    } else { // Assume 11x11
+        int r = index / cols;
+        int c = index % cols;
+        if (r < 11 && c < 11) {
+            char rowChar = 'A' + r;
+            char colChar = 'A' + c;
+            return std::string{rowChar, colChar};
+        }
     }
-    return std::to_string(index + 1);
+    return "";
 }
 
 } // namespace
@@ -305,7 +318,8 @@ gboolean WaylandOverlay::drawCallback(GtkWidget* widget, cairo_t* cr, gpointer d
     cairo_set_line_cap(cr, CAIRO_LINE_CAP_SQUARE);
 
     const double minCell = std::min(drawRect.w / cols, drawRect.h / rows);
-    const double fontSize = clampValue(minCell * 0.14, 14.0, 42.0);
+    double fontSizeMultiplier = (cols == 6) ? 0.35 : 0.25;
+    const double fontSize = clampValue(minCell * fontSizeMultiplier, 12.0, 72.0);
     const double gridStroke = clampValue(minCell * 0.010, 1.0, 2.0);
     const double borderStroke = clampValue(minCell * 0.012, 1.2, 2.4);
 
@@ -321,7 +335,7 @@ gboolean WaylandOverlay::drawCallback(GtkWidget* widget, cairo_t* cr, gpointer d
             const double x1 = drawRect.x + (drawRect.w * (c + 1)) / cols;
 
             const int index = r * cols + c;
-            const Rgba fill = withAlpha(tileColorForIndex(index), 0.22);
+            const Rgba fill = withAlpha(tileColorForIndex(index), 0.30);
 
             cairo_rectangle(cr, x0, y0, std::max(1.0, x1 - x0), std::max(1.0, y1 - y0));
             cairo_set_source_rgba(cr, fill.r, fill.g, fill.b, fill.a);
@@ -329,7 +343,7 @@ gboolean WaylandOverlay::drawCallback(GtkWidget* widget, cairo_t* cr, gpointer d
         }
     }
 
-    cairo_set_source_rgba(cr, 0.92, 0.95, 1.0, 0.55);
+    cairo_set_source_rgba(cr, 0.92, 0.95, 1.0, 0.25);
     cairo_set_line_width(cr, gridStroke);
     for (int c = 1; c < cols; ++c) {
         const double x = drawRect.x + (drawRect.w * c) / cols;
@@ -350,7 +364,7 @@ gboolean WaylandOverlay::drawCallback(GtkWidget* widget, cairo_t* cr, gpointer d
 
     cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
     cairo_set_font_size(cr, fontSize);
-    cairo_set_source_rgba(cr, 0.98, 0.99, 1.0, 0.92);
+    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);
 
     for (int r = 0; r < rows; ++r) {
         const double y0 = drawRect.y + (drawRect.h * r) / rows;
@@ -358,7 +372,7 @@ gboolean WaylandOverlay::drawCallback(GtkWidget* widget, cairo_t* cr, gpointer d
         for (int c = 0; c < cols; ++c) {
             const double x0 = drawRect.x + (drawRect.w * c) / cols;
             const double x1 = drawRect.x + (drawRect.w * (c + 1)) / cols;
-            const std::string label = labelForIndex(r * cols + c);
+            const std::string label = labelForIndex(r * cols + c, cols);
 
             cairo_text_extents_t extents;
             cairo_text_extents(cr, label.c_str(), &extents);
