@@ -11,6 +11,7 @@ namespace Config {
     int LEVEL0_GRID_COLS = 11;
     int LEVEL1_GRID_ROWS = 6;
     int LEVEL1_GRID_COLS = 6;
+    int MAX_RECURSION_DEPTH = 1;
 
     double OVERLAY_BOUNDS_EPSILON = 3.0;
     std::chrono::milliseconds OVERLAY_SETTLE_POLL_INTERVAL(8);
@@ -72,6 +73,7 @@ namespace Config {
                 else if (key == "level0_cols") LEVEL0_GRID_COLS = std::stoi(val);
                 else if (key == "level1_rows") LEVEL1_GRID_ROWS = std::stoi(val);
                 else if (key == "level1_cols") LEVEL1_GRID_COLS = std::stoi(val);
+                else if (key == "max_recursion") MAX_RECURSION_DEPTH = std::stoi(val);
                 else if (key == "overlay_alpha") OVERLAY_FILL_ALPHA = std::stod(val);
             } catch (const std::exception& e) {
                 LOG_ERROR("Failed to parse config key '", key, "': ", e.what());

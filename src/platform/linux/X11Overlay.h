@@ -20,7 +20,7 @@ public:
     bool initialize();
     void show() override;
     void hide() override;
-    void updateGrid(int rows, int cols, double x, double y, double w, double h) override;
+    void updateGrid(int rows, int cols, double x, double y, double w, double h, bool showPoint = false) override;
     bool getBounds(Rect& out) override;
 
     Window getWindow() const { return window; }
@@ -47,6 +47,7 @@ private:
     // Grid state
     int gridRows = 3;
     int gridCols = 3;
+    bool showTargetPoint = false;
     Rect currentRect;
     bool runningOnWayland = false;
     

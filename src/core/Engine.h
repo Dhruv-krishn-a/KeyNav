@@ -24,6 +24,8 @@ struct EngineState {
     int gridRows = 10;
     int gridCols = 10;
     char firstChar = '\0';
+    char lastPressedChar = '\0';
+    bool showPoint = false;
     int recursionDepth = 0;
 };
 

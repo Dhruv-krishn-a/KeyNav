@@ -117,6 +117,8 @@ void X11Input::handleEvent(XEvent& event) {
                 engine->onKeyRelease('a' + (key - XK_a));
             } else if (key >= XK_A && key <= XK_Z) {
                 engine->onKeyRelease('a' + (key - XK_A));
+            } else if (key >= XK_0 && key <= XK_9) {
+                engine->onKeyRelease('0' + (key - XK_0));
             }
         }
         // Swallow other keys

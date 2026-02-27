@@ -290,11 +290,12 @@ void X11Overlay::hide() {
     XFlush(display);
 }
 
-void X11Overlay::updateGrid(int rows, int cols, double x, double y, double w, double h) {
+void X11Overlay::updateGrid(int rows, int cols, double x, double y, double w, double h, bool showPoint) {
     std::lock_guard<std::mutex> lock(overlayMutex);
 
     gridRows = rows;
     gridCols = cols;
+    showTargetPoint = showPoint;
     currentRect = {x, y, w, h};
     renderLocked();
 }
@@ -412,63 +413,85 @@ void X11Overlay::renderLocked() {
     cairo_clip(cr);
 
     // Draw contiguous translucent cells (no gap).
-    for (int r = 0; r < gridRows; ++r) {
-        const double y0 = drawRect.y + (drawRect.h * r) / gridRows;
-        const double y1 = drawRect.y + (drawRect.h * (r + 1)) / gridRows;
-        for (int c = 0; c < gridCols; ++c) {
-            const double x0 = drawRect.x + (drawRect.w * c) / gridCols;
-            const double x1 = drawRect.x + (drawRect.w * (c + 1)) / gridCols;
+    if (!showTargetPoint) {
+        for (int r = 0; r < gridRows; ++r) {
+            const double y0 = drawRect.y + (drawRect.h * r) / gridRows;
+            const double y1 = drawRect.y + (drawRect.h * (r + 1)) / gridRows;
+            for (int c = 0; c < gridCols; ++c) {
+                const double x0 = drawRect.x + (drawRect.w * c) / gridCols;
+                const double x1 = drawRect.x + (drawRect.w * (c + 1)) / gridCols;
 
-            const int index = r * gridCols + c;
-            const Config::Rgba fill = withAlpha(tileColorForIndex(index), Config::OVERLAY_FILL_ALPHA);
+                const int index = r * gridCols + c;
+                const Config::Rgba fill = withAlpha(tileColorForIndex(index), Config::OVERLAY_FILL_ALPHA);
 
-            cairo_rectangle(cr, x0, y0, std::max(1.0, x1 - x0), std::max(1.0, y1 - y0));
-            cairo_set_source_rgba(cr, fill.r, fill.g, fill.b, fill.a);
-            cairo_fill(cr);
+                cairo_rectangle(cr, x0, y0, std::max(1.0, x1 - x0), std::max(1.0, y1 - y0));
+                cairo_set_source_rgba(cr, fill.r, fill.g, fill.b, fill.a);
+                cairo_fill(cr);
+            }
         }
+    } else {
+        // Draw a small high-visibility target point at the center
+        const double cx = drawRect.x + drawRect.w / 2.0;
+        const double cy = drawRect.y + drawRect.h / 2.0;
+        const double radius = 4.0;
+
+        cairo_set_source_rgba(cr, 1.0, 0.0, 0.0, 0.8); // Red point
+        cairo_arc(cr, cx, cy, radius, 0, 2 * M_PI);
+        cairo_fill(cr);
+        
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.9); // White border
+        cairo_set_line_width(cr, 1.5);
+        cairo_arc(cr, cx, cy, radius, 0, 2 * M_PI);
+        cairo_stroke(cr);
     }
 
     // Grid dividers.
-    cairo_set_source_rgba(cr, 0.92, 0.95, 1.0, 0.25);
-    cairo_set_line_width(cr, gridStroke);
-    for (int c = 1; c < gridCols; ++c) {
-        const double x = drawRect.x + (drawRect.w * c) / gridCols;
-        cairo_move_to(cr, x, drawRect.y);
-        cairo_line_to(cr, x, drawRect.y + drawRect.h);
+    if (!showTargetPoint) {
+        cairo_set_source_rgba(cr, 0.92, 0.95, 1.0, 0.25);
+        cairo_set_line_width(cr, gridStroke);
+        for (int c = 1; c < gridCols; ++c) {
+            const double x = drawRect.x + (drawRect.w * c) / gridCols;
+            cairo_move_to(cr, x, drawRect.y);
+            cairo_line_to(cr, x, drawRect.y + drawRect.h);
+        }
+        for (int r = 1; r < gridRows; ++r) {
+            const double y = drawRect.y + (drawRect.h * r) / gridRows;
+            cairo_move_to(cr, drawRect.x, y);
+            cairo_line_to(cr, drawRect.x + drawRect.w, y);
+        }
+        cairo_stroke(cr);
     }
-    for (int r = 1; r < gridRows; ++r) {
-        const double y = drawRect.y + (drawRect.h * r) / gridRows;
-        cairo_move_to(cr, drawRect.x, y);
-        cairo_line_to(cr, drawRect.x + drawRect.w, y);
-    }
-    cairo_stroke(cr);
 
     // Outer border end-to-end.
-    cairo_set_source_rgba(cr, 0.96, 0.97, 1.0, 0.75);
-    cairo_set_line_width(cr, borderStroke);
-    cairo_rectangle(cr, drawRect.x, drawRect.y, drawRect.w, drawRect.h);
-    cairo_stroke(cr);
+    if (!showTargetPoint) {
+        cairo_set_source_rgba(cr, 0.96, 0.97, 1.0, 0.75);
+        cairo_set_line_width(cr, borderStroke);
+        cairo_rectangle(cr, drawRect.x, drawRect.y, drawRect.w, drawRect.h);
+        cairo_stroke(cr);
+    }
 
     // Key labels (smaller, readable).
-    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
-    cairo_set_font_size(cr, fontSize);
-    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);
+    if (!showTargetPoint) {
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+        cairo_set_font_size(cr, fontSize);
+        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);
 
-    for (int r = 0; r < gridRows; ++r) {
-        const double y0 = drawRect.y + (drawRect.h * r) / gridRows;
-        const double y1 = drawRect.y + (drawRect.h * (r + 1)) / gridRows;
-        for (int c = 0; c < gridCols; ++c) {
-            const double x0 = drawRect.x + (drawRect.w * c) / gridCols;
-            const double x1 = drawRect.x + (drawRect.w * (c + 1)) / gridCols;
-            const std::string label = labelForIndex(r * gridCols + c, gridCols);
+        for (int r = 0; r < gridRows; ++r) {
+            const double y0 = drawRect.y + (drawRect.h * r) / gridRows;
+            const double y1 = drawRect.y + (drawRect.h * (r + 1)) / gridRows;
+            for (int c = 0; c < gridCols; ++c) {
+                const double x0 = drawRect.x + (drawRect.w * c) / gridCols;
+                const double x1 = drawRect.x + (drawRect.w * (c + 1)) / gridCols;
+                const std::string label = labelForIndex(r * gridCols + c, gridCols);
 
-            cairo_text_extents_t extents;
-            cairo_text_extents(cr, label.c_str(), &extents);
+                cairo_text_extents_t extents;
+                cairo_text_extents(cr, label.c_str(), &extents);
 
-            const double textX = x0 + ((x1 - x0) - extents.width) * 0.5 - extents.x_bearing;
-            const double textY = y0 + ((y1 - y0) - extents.height) * 0.5 - extents.y_bearing;
-            cairo_move_to(cr, textX, textY);
-            cairo_show_text(cr, label.c_str());
+                const double textX = x0 + ((x1 - x0) - extents.width) * 0.5 - extents.x_bearing;
+                const double textY = y0 + ((y1 - y0) - extents.height) * 0.5 - extents.y_bearing;
+                cairo_move_to(cr, textX, textY);
+                cairo_show_text(cr, label.c_str());
+            }
         }
     }
 

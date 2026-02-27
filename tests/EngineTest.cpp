@@ -27,7 +27,7 @@ public:
 
     void show() override { isVisible = true; }
     void hide() override { isVisible = false; }
-    void updateGrid(int rows, int cols, double x, double y, double w, double h) override { updates++; }
+    void updateGrid(int rows, int cols, double x, double y, double w, double h, bool showPoint) override { updates++; }
     bool getBounds(Rect& out) override { out = {0, 0, 1920, 1080}; return true; }
 };
 

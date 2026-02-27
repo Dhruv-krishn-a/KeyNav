@@ -17,6 +17,8 @@ void Engine::initialize() {
     state.gridRows = Config::LEVEL0_GRID_ROWS;
     state.gridCols = Config::LEVEL0_GRID_COLS;
     state.recursionDepth = 0;
+    state.lastPressedChar = '\0';
+    state.showPoint = false;
 }
 
 void Engine::run() {
@@ -33,6 +35,7 @@ void Engine::onActivate() {
     state.gridRows = Config::LEVEL0_GRID_ROWS;
     state.gridCols = Config::LEVEL0_GRID_COLS;
     state.recursionDepth = 0;
+    state.showPoint = false;
 
     // Start with full root-screen rect.
     int w, h;
@@ -151,8 +154,8 @@ void Engine::onChar(char c, bool shiftPressed) {
         }
     }
     else if (state.mode == EngineMode::Level1_Recursive) {
-        if (state.recursionDepth >= 1) {
-            return; // Stop recursion after 2nd iteration (1st selection from 6x6)
+        if (state.recursionDepth >= Config::MAX_RECURSION_DEPTH) {
+            return; // Stop recursion after reached max depth
         }
 
         int index = -1;
@@ -180,13 +183,30 @@ void Engine::onChar(char c, bool shiftPressed) {
             platform->moveCursor(cursorX, cursorY);
             
             state.recursionDepth++;
+            state.lastPressedChar = c; // Remember this key to handle release later
+
+            if (state.recursionDepth >= Config::MAX_RECURSION_DEPTH) {
+                state.showPoint = true;
+            }
+
             updateOverlay();
         }
     }
 }
 
 void Engine::onKeyRelease(char c) {
-    // Not needed for this flow
+    if (state.mode == EngineMode::Inactive) return;
+    
+    if (c >= 'A' && c <= 'Z') {
+        c = c + ('a' - 'A');
+    }
+
+    // If the final recursion key is released, we deactivate the engine.
+    if (state.mode == EngineMode::Level1_Recursive && 
+        state.recursionDepth >= Config::MAX_RECURSION_DEPTH &&
+        c == state.lastPressedChar) {
+        onDeactivate();
+    }
 }
 
 void Engine::onControlKey(const std::string& key) {
@@ -204,6 +224,10 @@ void Engine::onControlKey(const std::string& key) {
 void Engine::onUndo() {
     if (state.mode == EngineMode::Inactive) return;
     
+    // Ensure overlay is visible when we back up from a final selection
+    overlay->show();
+    state.showPoint = false;
+
     if (state.mode == EngineMode::Level0_SecondChar) {
         state.mode = EngineMode::Level0_FirstChar;
         state.firstChar = '\0';
@@ -247,6 +271,9 @@ void Engine::onClick(int button, int count, bool deactivate) {
         // before we inject the mouse click, otherwise GTK ignores the click.
         std::this_thread::sleep_for(Config::POST_UNGRAB_DELAY);
     } else {
+        // If we are NOT deactivating (just a click while holding a key), 
+        // we briefly hide the overlay to let the OS process the click target
+        // correctly if it's sensitive to overlay windows.
         if (overlay) overlay->hide();
         std::this_thread::sleep_for(Config::POST_UNGRAB_DELAY);
     }
@@ -261,5 +288,6 @@ void Engine::onClick(int button, int count, bool deactivate) {
 void Engine::updateOverlay() {
     overlay->updateGrid(state.gridRows, state.gridCols, 
                         state.currentRect.x, state.currentRect.y, 
-                        state.currentRect.w, state.currentRect.h);
+                        state.currentRect.w, state.currentRect.h,
+                        state.showPoint);
 }

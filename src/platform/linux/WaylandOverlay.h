@@ -16,7 +16,7 @@ public:
 
     void show() override;
     void hide() override;
-    void updateGrid(int rows, int cols, double x, double y, double w, double h) override;
+    void updateGrid(int rows, int cols, double x, double y, double w, double h, bool showPoint = false) override;
     bool getBounds(Rect& out) override;
     void setGlobalOrigin(int x, int y);
 
@@ -40,6 +40,7 @@ private:
 
     int gridRows = 3;
     int gridCols = 3;
+    bool showTargetPoint = false;
     Rect currentRect{0.0, 0.0, 1.0, 1.0};
     Rect bounds{0.0, 0.0, 1.0, 1.0};
 

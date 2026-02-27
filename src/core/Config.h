@@ -13,6 +13,7 @@ namespace Config {
     extern int LEVEL0_GRID_COLS;
     extern int LEVEL1_GRID_ROWS;
     extern int LEVEL1_GRID_COLS;
+    extern int MAX_RECURSION_DEPTH;
 
     // Overlay bounds tolerance (pixels)
     extern double OVERLAY_BOUNDS_EPSILON;

@@ -124,11 +124,12 @@ void WaylandOverlay::hide() {
     g_idle_add(WaylandOverlay::idleHide, this);
 }
 
-void WaylandOverlay::updateGrid(int rows, int cols, double x, double y, double w, double h) {
+void WaylandOverlay::updateGrid(int rows, int cols, double x, double y, double w, double h, bool showPoint) {
     {
         std::lock_guard<std::mutex> lock(stateMutex);
         gridRows = std::max(rows, 1);
         gridCols = std::max(cols, 1);
+        showTargetPoint = showPoint;
         currentRect = {x, y, w, h};
     }
     g_idle_add(WaylandOverlay::idleQueueDraw, this);
@@ -249,6 +250,7 @@ gboolean WaylandOverlay::drawCallback(GtkWidget* widget, cairo_t* cr, gpointer d
     Rect localRect;
     int rows = 3;
     int cols = 3;
+    bool showPoint = false;
 
     {
         std::lock_guard<std::mutex> lock(self->stateMutex);
@@ -256,6 +258,7 @@ gboolean WaylandOverlay::drawCallback(GtkWidget* widget, cairo_t* cr, gpointer d
         localRect = self->currentRect;
         rows = self->gridRows;
         cols = self->gridCols;
+        showPoint = self->showTargetPoint;
     }
 
     const int surfaceW = gtk_widget_get_allocated_width(widget);
@@ -312,60 +315,77 @@ gboolean WaylandOverlay::drawCallback(GtkWidget* widget, cairo_t* cr, gpointer d
     cairo_rectangle(cr, 0.0, 0.0, (double)surfaceW, (double)surfaceH);
     cairo_clip(cr);
 
-    for (int r = 0; r < rows; ++r) {
-        const double y0 = drawRect.y + (drawRect.h * r) / rows;
-        const double y1 = drawRect.y + (drawRect.h * (r + 1)) / rows;
-        for (int c = 0; c < cols; ++c) {
-            const double x0 = drawRect.x + (drawRect.w * c) / cols;
-            const double x1 = drawRect.x + (drawRect.w * (c + 1)) / cols;
+    if (!showPoint) {
+        for (int r = 0; r < rows; ++r) {
+            const double y0 = drawRect.y + (drawRect.h * r) / rows;
+            const double y1 = drawRect.y + (drawRect.h * (r + 1)) / rows;
+            for (int c = 0; c < cols; ++c) {
+                const double x0 = drawRect.x + (drawRect.w * c) / cols;
+                const double x1 = drawRect.x + (drawRect.w * (c + 1)) / cols;
 
-            const int index = r * cols + c;
-            const Config::Rgba fill = withAlpha(tileColorForIndex(index), Config::OVERLAY_FILL_ALPHA);
+                const int index = r * cols + c;
+                const Config::Rgba fill = withAlpha(tileColorForIndex(index), Config::OVERLAY_FILL_ALPHA);
 
-            cairo_rectangle(cr, x0, y0, std::max(1.0, x1 - x0), std::max(1.0, y1 - y0));
-            cairo_set_source_rgba(cr, fill.r, fill.g, fill.b, fill.a);
-            cairo_fill(cr);
+                cairo_rectangle(cr, x0, y0, std::max(1.0, x1 - x0), std::max(1.0, y1 - y0));
+                cairo_set_source_rgba(cr, fill.r, fill.g, fill.b, fill.a);
+                cairo_fill(cr);
+            }
         }
+    } else {
+        const double cx = drawRect.x + drawRect.w / 2.0;
+        const double cy = drawRect.y + drawRect.h / 2.0;
+        const double radius = 4.0;
+
+        cairo_set_source_rgba(cr, 1.0, 0.0, 0.0, 0.8); // Red
+        cairo_arc(cr, cx, cy, radius, 0, 2 * M_PI);
+        cairo_fill(cr);
+        
+        cairo_set_source_rgba(cr, 1.0, 1.0, 1.0, 0.9); // White border
+        cairo_set_line_width(cr, 1.5);
+        cairo_arc(cr, cx, cy, radius, 0, 2 * M_PI);
+        cairo_stroke(cr);
     }
 
-    cairo_set_source_rgba(cr, 0.92, 0.95, 1.0, 0.25);
-    cairo_set_line_width(cr, gridStroke);
-    for (int c = 1; c < cols; ++c) {
-        const double x = drawRect.x + (drawRect.w * c) / cols;
-        cairo_move_to(cr, x, drawRect.y);
-        cairo_line_to(cr, x, drawRect.y + drawRect.h);
-    }
-    for (int r = 1; r < rows; ++r) {
-        const double y = drawRect.y + (drawRect.h * r) / rows;
-        cairo_move_to(cr, drawRect.x, y);
-        cairo_line_to(cr, drawRect.x + drawRect.w, y);
-    }
-    cairo_stroke(cr);
+    if (!showPoint) {
+        cairo_set_source_rgba(cr, 0.92, 0.95, 1.0, 0.25);
+        cairo_set_line_width(cr, gridStroke);
+        for (int c = 1; c < cols; ++c) {
+            const double x = drawRect.x + (drawRect.w * c) / cols;
+            cairo_move_to(cr, x, drawRect.y);
+            cairo_line_to(cr, x, drawRect.y + drawRect.h);
+        }
+        for (int r = 1; r < rows; ++r) {
+            const double y = drawRect.y + (drawRect.h * r) / rows;
+            cairo_move_to(cr, drawRect.x, y);
+            cairo_line_to(cr, drawRect.x + drawRect.w, y);
+        }
+        cairo_stroke(cr);
 
-    cairo_set_source_rgba(cr, 0.96, 0.97, 1.0, 0.75);
-    cairo_set_line_width(cr, borderStroke);
-    cairo_rectangle(cr, drawRect.x, drawRect.y, drawRect.w, drawRect.h);
-    cairo_stroke(cr);
+        cairo_set_source_rgba(cr, 0.96, 0.97, 1.0, 0.75);
+        cairo_set_line_width(cr, borderStroke);
+        cairo_rectangle(cr, drawRect.x, drawRect.y, drawRect.w, drawRect.h);
+        cairo_stroke(cr);
 
-    cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
-    cairo_set_font_size(cr, fontSize);
-    cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);
+        cairo_select_font_face(cr, "Sans", CAIRO_FONT_SLANT_NORMAL, CAIRO_FONT_WEIGHT_BOLD);
+        cairo_set_font_size(cr, fontSize);
+        cairo_set_source_rgba(cr, 0.0, 0.0, 0.0, 1.0);
 
-    for (int r = 0; r < rows; ++r) {
-        const double y0 = drawRect.y + (drawRect.h * r) / rows;
-        const double y1 = drawRect.y + (drawRect.h * (r + 1)) / rows;
-        for (int c = 0; c < cols; ++c) {
-            const double x0 = drawRect.x + (drawRect.w * c) / cols;
-            const double x1 = drawRect.x + (drawRect.w * (c + 1)) / cols;
-            const std::string label = labelForIndex(r * cols + c, cols);
+        for (int r = 0; r < rows; ++r) {
+            const double y0 = drawRect.y + (drawRect.h * r) / rows;
+            const double y1 = drawRect.y + (drawRect.h * (r + 1)) / rows;
+            for (int c = 0; c < cols; ++c) {
+                const double x0 = drawRect.x + (drawRect.w * c) / cols;
+                const double x1 = drawRect.x + (drawRect.w * (c + 1)) / cols;
+                const std::string label = labelForIndex(r * cols + c, cols);
 
-            cairo_text_extents_t extents;
-            cairo_text_extents(cr, label.c_str(), &extents);
+                cairo_text_extents_t extents;
+                cairo_text_extents(cr, label.c_str(), &extents);
 
-            const double textX = x0 + ((x1 - x0) - extents.width) * 0.5 - extents.x_bearing;
-            const double textY = y0 + ((y1 - y0) - extents.height) * 0.5 - extents.y_bearing;
-            cairo_move_to(cr, textX, textY);
-            cairo_show_text(cr, label.c_str());
+                const double textX = x0 + ((x1 - x0) - extents.width) * 0.5 - extents.x_bearing;
+                const double textY = y0 + ((y1 - y0) - extents.height) * 0.5 - extents.y_bearing;
+                cairo_move_to(cr, textX, textY);
+                cairo_show_text(cr, label.c_str());
+            }
         }
     }
 
