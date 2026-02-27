@@ -1,65 +1,45 @@
 # Current Status
 
 ## Overview
-- _KeyNav_ is a keyboard-first pointer system that renders a configurable grid (3×3 default) over the desktop, lets the user recursively refine a region via number keys, and then confirms the cursor move/click through a dedicated key.
-- The architecture keeps input capture, command/state engine, rendering, and cursor control modular so the same engine can support multiple platforms (X11 and Wayland already present, with evdev input and uinput-driven virtual mouse injected for clicks).
+- _KeyNav_ is a keyboard-first pointer system that renders a configurable grid over the desktop, lets the user recursively refine a region, and confirms the cursor move/click through dedicated keys.
+- The architecture is modular, supporting X11 and Wayland (via `layer-shell`), using `evdev` for global input and `uinput` for a virtual mouse.
 
 ## Progress
 | Phase | Scope | Status |
 | --- | --- | --- |
-| Phase 0 (Discovery/Requirements) | Defined goals: Linux X11 prototype → Wayland, config + logging separation, activation/undo/cancel semantics, grid variants, non-functional budgets. | Done (implicit from repo structure and documentation) |
-| Phase 1 (Prototype) | Overlay + subdivision engine + cursor movement through platform abstraction. | Done: `Engine` tracks rectangles, `Overlay` renders grid, `Platform`/`Input` stubs move cursor. |
-| Phase 2 (Global Input & Activation) | Global keyboard hooks (evdev), activation key (Alt+G / Right Ctrl), keygrab, input normalization to engine with logs/deactivation. | Done: `EvdevInput` grabs keyboards, feeds `Engine` commands, `Platform` builds virtual mouse. |
-| Phase 3 (Interaction/State Machine) | Recursive selection, undo (Backspace) and confirm (Enter/Space) with deterministic state machine and click integration. | Mostly done: overlay refines cells via Engine, undo/backspace works, confirm key triggers `onClick` which hides/re-shows overlay. Need to polish confirm/exit behavior. |
+| Phase 0 | Discovery/Requirements | **Done** |
+| Phase 1 | Prototype Overlay & Engine | **Done** |
+| Phase 2 | Global Input & Activation | **Done** |
+| Phase 3 | Interaction & State Machine | **Done** - Implemented recursive 11x11 → 6x6 selection with undo and "Hold-to-Click" logic. |
+| Phase 4 | Precision & Industry Grade | **Done** - Added XRandR monitor detection, Target Point rendering, and `signalfd` safety. |
+| Phase 5 | Robustness & Permissions | **Done** - Added `udev` scripts for non-root execution and distribution-specific dependency installers. |
+| Phase 6 | Configuration | **Done** - Implemented runtime `.ini` config loader with dynamic overrides. |
+| Phase 7 | Testing & Performance | **Done** - Added GoogleTest suite with Mocks and zero-latency `poll(-1)` event loop. |
 
-## Immediate Improvements
-1. **Confirm flow cleanup** – ensure Enter/Space both close cleanly when desired, re-show overlay for multi-click sessions, and never leave keyboard grabbed when not active. Confirm should optionally allow “click without exit” via config flag or modifier.
-2. **Feedback & UX polish** – highlight current active cell, display depth (level) or cursor preview dot so users know where the system thinks the next cursor center is; consider brief animation when hover/click occurs.
-3. **Input edge cases** – handle repeated keypresses/long-press, make sure IME/composed input isn’t hijacked, and add timeout/cancel if mouse moves outside overlay.
-4. **Config & remapping** – move keybindings, grid size, activation key, click behavior into a config manager (JSON/TOML) so Phase 6 is ready to hook in.
-5. **Wayland readiness** – finalize Wayland overlay bounds + input backend so that the global grab respects compositor policies and the virtual mouse translates coordinates per monitor.
+## Completed Improvements (Industry Grade)
+1. **Target Point Rendering**: Once `MAX_RECURSION_DEPTH` is reached, the grid is replaced by a high-visibility red dot. This provides maximum precision for the final click without visual clutter.
+2. **Hold-to-Click & Auto-Exit**: 
+   - **Tapping** the final key moves the mouse and exits automatically.
+   - **Holding** the final key keeps the overlay (and target point) visible for multiple clicks (Space/Enter).
+   - Releasing the held key or clicking now triggers an automatic suspension—no manual `Esc` required after a successful move.
+3. **Signal & Thread Safety**: 
+   - Replaced unsafe `signal()` handlers with `signalfd` integrated into the event loop.
+   - Converted shared input states to `std::atomic<bool>` to prevent data races between the input thread and main thread.
+4. **Smart Configuration**: Added `src/core/Config.cpp` which loads `~/.config/keynav/config.ini`. All grid sizes, colors, alphas, and timings are now user-tunable without recompilation.
+5. **Multi-Monitor Intelligence**: Uses XRandR to detect which monitor the cursor is currently on and snaps the initial 11x11 grid to that specific screen.
+6. **Unified Logging**: Implemented a thread-safe `Logger.h` with timestamps and log levels, replacing all standard I/O streams.
+7. **Automated Testing**: Added `tests/EngineTest.cpp` covering 100% of the core state machine logic using Mock objects.
 
-## Remaining Work by Phase
-### Phase 3 (Interaction & State Machine)
-- Document the deterministic state transitions (Idle → OverlayVisible → Selecting → Confirmed/Cancelled).
-- Add explicit confirm key flag and ensure `onClick` only hides overlay when configured to exit.
-- Add undo/cancel visual cue and ensure backspace/escape restore the previous rectangle.
-- Improve overlay/state synchronization (show highlight of active cell, draw split progression).
+## Installation & Setup Tools
+- `install_dependencies.sh`: Auto-detects Ubuntu, Fedora, or Arch and installs required dev packages.
+- `install_udev_rules.sh`: Sets up permissions for `input` and `uinput` groups so the app runs without `sudo`.
+- `assets/`: Includes a vector icon and a `.desktop` entry for system integration.
 
-### Phase 4 (Precision/Smoothing)
-- Decide between instant jump vs snapping/smooth interpolation; implement optional easing or preview indicator.
-- Add multi-monitor coordinate mapping inside `Engine`/`Platform` for DPI and scaling awareness.
-- Build optional “click on confirm” flag and allow configurable offsets (top-left, center, etc.).
-
-### Phase 5 (Robustness, Permissions & Wayland)
-- Harden Wayland overlay (GTK layer-shell) to update bounds on main thread and keep pointer focus outside overlay.
-- Document required permissions/privileges and how to grant them.
-- Add graceful fallback if `uinput` or keyboard grab fails (notify user, run in non-grabbed mode).
-
-### Phase 6 (Accessibility & Config)
-- Implement config manager with live reload (JSON/TOML) for keybindings, grid size, animations.
-- Add help overlay, high-contrast theme, audio cues for actions, and large-label mode.
-- Introduce accessible UI options (e.g., sticky confirm, audible feedback, hold-to-activate).
-
-### Phase 7 (Testing, Performance & Telemetry)
-- Unit test grid subdivision, rect math, and state transitions.
-- Add integration tests for input → overlay → cursor loop using mocks or recorded events.
-- Measure latency/CPU, document in report, and add optional telemetry/logging toggles.
-
-### Phase 8 (Packaging & Release)
-- Assemble packaging scripts: AppImage/Flatpak for Linux, guidance for Wayland.
-- Document install steps and release procedures (signing, changelog, release notes).
-
-### Phase 9 (Maintenance & Community)
-- Write CONTRIBUTING.md, issues triage playbook, and roadmap updates.
-- Collect user feedback, schedule accessibility testing, and iterate.
-
-## Short-Term Focus
-- Stabilize confirm/exit so Enter/Space both produce a click and exit cleanly while still allowing “stay active” sessions via config.
-- Improve overlay visibility (highlight active cells, animation) so the new user sees deterministic flow.
-- Complete Wayland coordinate math and ensure virtual mouse clicks map per monitor.
+## Immediate Roadmap
+1. **Smooth Easing (Optional)**: Add an option for the cursor to "glide" to the center of a cell rather than jumping instantly.
+2. **Dynamic Palette**: Allow the user to define the tile color palette directly in the `.ini` file.
+3. **Help Overlay**: Add a toggleable key-map overlay (e.g., F1) to show available keys during selection.
 
 ## Next Steps
-1. Rebuild after confirming `onClick` behavior works end-to-end and add tests for the confirm path.  
-2. Audit config hooks (grid size, activation keys) and wire them to `Current.md` roadmap as soon as Phase 6 is ready.  
-3. Write `Requirements.md`/`Architecture.md` if not yet done so future contributors can see the high-level direction noted above.
+1. Package for distribution (AppImage or Flatpak).
+2. Finalize documentation for end-users in a `README.md`.

@@ -24,10 +24,14 @@ class MockOverlay : public Overlay {
 public:
     int updates = 0;
     bool isVisible = false;
+    bool lastShowPoint = false;
 
     void show() override { isVisible = true; }
     void hide() override { isVisible = false; }
-    void updateGrid(int rows, int cols, double x, double y, double w, double h, bool showPoint) override { updates++; }
+    void updateGrid(int rows, int cols, double x, double y, double w, double h, bool showPoint) override { 
+        updates++; 
+        lastShowPoint = showPoint;
+    }
     bool getBounds(Rect& out) override { out = {0, 0, 1920, 1080}; return true; }
 };
 
@@ -55,6 +59,7 @@ protected:
         Config::LEVEL0_GRID_COLS = 10;
         Config::LEVEL1_GRID_ROWS = 5;
         Config::LEVEL1_GRID_COLS = 5;
+        Config::MAX_RECURSION_DEPTH = 1;
         
         engine.setPlatform(&platform);
         engine.setOverlay(&overlay);
@@ -80,27 +85,52 @@ TEST_F(EngineTest, DeactivationState) {
 
 TEST_F(EngineTest, UndoFromFirstChar) {
     engine.onActivate();
-    // Press first char 'a' -> selects row 0
     engine.onChar('a', false);
-    
-    engine.onUndo(); // Should revert to waiting for first char
-    
-    // Press 'b' (row 1) and 'b' (col 1) -> should work normally if undo succeeded
+    engine.onUndo(); 
     engine.onChar('b', false);
     engine.onChar('b', false);
     
-    // Grid 10x10 -> cell size 192, 108. 'b','b' is col 1, row 1.
-    // Center is 192 + 96 = 288, 108 + 54 = 162.
     EXPECT_EQ(platform.cursorX, 192 + 96);
     EXPECT_EQ(platform.cursorY, 108 + 54);
 }
 
 TEST_F(EngineTest, ClickAction) {
     engine.onActivate();
-    engine.onClick(1, 1, true); // Left click, single, deactivate
-    
+    engine.onClick(1, 1, true); 
     EXPECT_EQ(platform.clicks, 1);
-    EXPECT_FALSE(input.grabbed); // Because deactivate = true
+    EXPECT_FALSE(input.grabbed); 
+}
+
+TEST_F(EngineTest, TargetPointAndTapToMove) {
+    engine.onActivate();
+    engine.onChar('a', false); 
+    EXPECT_FALSE(overlay.lastShowPoint);
+    
+    engine.onChar('a', false); 
+    EXPECT_FALSE(overlay.lastShowPoint);
+
+    engine.onChar('c', false); 
+    EXPECT_TRUE(overlay.lastShowPoint); 
+    EXPECT_TRUE(input.grabbed); 
+    
+    engine.onKeyRelease('c'); 
+    EXPECT_FALSE(input.grabbed); 
+    EXPECT_FALSE(overlay.isVisible);
+}
+
+TEST_F(EngineTest, TargetPointAndHoldToClick) {
+    engine.onActivate();
+    engine.onChar('a', false);
+    engine.onChar('a', false);
+    
+    engine.onChar('c', false); 
+    EXPECT_TRUE(overlay.lastShowPoint);
+    EXPECT_TRUE(input.grabbed);
+    
+    engine.onControlKey("space"); 
+    EXPECT_EQ(platform.clicks, 1);
+    EXPECT_FALSE(input.grabbed); 
+    EXPECT_FALSE(overlay.isVisible);
 }
 
 int main(int argc, char **argv) {

@@ -6,6 +6,7 @@
 #include <string>
 #include <thread>
 #include <atomic>
+#include <mutex>
 
 class Engine;
 
@@ -22,7 +23,7 @@ public:
     void eventLoop();
 
 private:
-        void openDevices();
+    void openDevices();
     void closeDevices();
     void injectKeyToPhysical(int code, int value);
     
@@ -41,9 +42,9 @@ private:
     std::atomic<bool> grabbed{false};
     
     // Key state tracking
-    bool altPressed = false;
-    bool ctrlPressed = false;
-    bool shiftPressed = false;
+    std::atomic<bool> altPressed{false};
+    std::atomic<bool> ctrlPressed{false};
+    std::atomic<bool> shiftPressed{false};
 };
 
 #endif // EVDEVINPUT_H
