@@ -2,6 +2,7 @@
 #include "../../core/Engine.h"
 #include <X11/keysym.h>
 #include <iostream>
+#include "../../core/Logger.h"
 
 X11Input::X11Input(Display* d, Engine* e) : display(d), engine(e) {}
 
@@ -18,11 +19,11 @@ bool X11Input::initialize(int screenW, int screenH) {
     activationKeyCode = XKeysymToKeycode(display, activationKeySym);
 
     if (activationKeyCode == 0) {
-        std::cerr << "X11Input: Failed to map activation key." << std::endl;
+        LOG_ERROR("X11Input: Failed to map activation key.");
         return false;
     }
 
-    std::cout << "Key Mapped: G -> " << (int)activationKeyCode << " with modifiers: " << activationModifiers << std::endl;
+    LOG_INFO("Key Mapped: G -> ", (int)activationKeyCode, " with modifiers: ", activationModifiers);
 
     grabActivationKey();
     return true;
@@ -43,7 +44,7 @@ void X11Input::grabActivationKey() {
     }
     XSync(display, False); // Force errors to be reported immediately
     
-    std::cout << "Global Hotkey Initialized (Check for X11 errors above)." << std::endl;
+    LOG_INFO("Global Hotkey Initialized (Check for X11 errors above).");
 }
 
 void X11Input::grabKeyboard() {
@@ -54,9 +55,9 @@ void X11Input::grabKeyboard() {
                                
     if (result == GrabSuccess) {
         keyboardGrabbed = true;
-        // std::cout << "Keyboard grabbed." << std::endl;
+        // LOG_INFO("Keyboard grabbed.");
     } else {
-        std::cerr << "Failed to grab keyboard. Result: " << result << std::endl;
+        LOG_ERROR("Failed to grab keyboard. Result: ", result);
     }
 }
 
@@ -65,7 +66,7 @@ void X11Input::ungrabKeyboard() {
     
     XUngrabKeyboard(display, CurrentTime);
     keyboardGrabbed = false;
-    // std::cout << "Keyboard ungrabbed." << std::endl;
+    // LOG_INFO("Keyboard ungrabbed.");
 }
 
 void X11Input::handleEvent(XEvent& event) {
@@ -73,7 +74,7 @@ void X11Input::handleEvent(XEvent& event) {
     
     // Debug log
     if (event.type == KeyPress) {
-        std::cout << "Event: KeyPress " << event.xkey.keycode << " state: " << event.xkey.state << std::endl;
+        LOG_INFO("Event: KeyPress ", event.xkey.keycode, " state: ", event.xkey.state);
     }
 
     KeySym key = XLookupKeysym(&event.xkey, 0);

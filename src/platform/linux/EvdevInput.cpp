@@ -1,6 +1,7 @@
 #include "EvdevInput.h"
 #include "../../core/Engine.h"
 #include <iostream>
+#include "../../core/Logger.h"
 #include <fcntl.h>
 #include <unistd.h>
 #include <linux/input.h>
@@ -38,7 +39,7 @@ bool EvdevInput::initialize(int screenW, int screenH) {
     setupVirtualMouse(screenW, screenH);
 
     if (deviceFds.empty()) {
-        std::cerr << "EvdevInput: No keyboard devices found. Are you running with sudo?" << std::endl;
+        LOG_ERROR("EvdevInput: No keyboard devices found. Are you running with sudo?");
         return false;
     }
     
@@ -99,7 +100,7 @@ void EvdevInput::setupVirtualMouse(int w, int h) {
         return;
     }
     
-    std::cout << "EvdevInput: Virtual Mouse device created successfully." << std::endl;
+    LOG_INFO("EvdevInput: Virtual Mouse device created successfully.");
 }
 
 void EvdevInput::moveMouse(int x, int y, int screenW, int screenH) {
@@ -143,7 +144,7 @@ void EvdevInput::moveMouse(int x, int y, int screenW, int screenH) {
 
 void EvdevInput::clickMouse(int button, int count) {
     if (virtualMouseFd < 0) {
-        std::cerr << "EvdevInput: Cannot click, virtual mouse FD is invalid!" << std::endl;
+        LOG_ERROR("EvdevInput: Cannot click, virtual mouse FD is invalid!");
         return;
     }
 
@@ -151,7 +152,7 @@ void EvdevInput::clickMouse(int button, int count) {
     if (button == 2) btnCode = BTN_MIDDLE;
     else if (button == 3) btnCode = BTN_RIGHT;
 
-    std::cout << "EvdevInput: Virtual Click - Code: " << btnCode << " Count: " << count << std::endl;
+    LOG_INFO("EvdevInput: Virtual Click - Code: ", btnCode, " Count: ", count);
 
     struct input_event ev;
     memset(&ev, 0, sizeof(ev));
@@ -223,7 +224,7 @@ void EvdevInput::openDevices() {
                     }
                     openedInodes.push_back(st.st_ino);
                 }
-                std::cout << "EvdevInput: Found Keyboard: " << path << " (fd: " << fd << ")" << std::endl;
+                LOG_INFO("EvdevInput: Found Keyboard: ", path, " (fd: ", fd, ")");
                 deviceFds.push_back(fd);
             } else {
                 close(fd);
@@ -251,7 +252,7 @@ void EvdevInput::grabKeyboard() {
         if (ioctl(fd, EVIOCGRAB, 1) == 0) {
             successfullyGrabbed.push_back(fd);
         } else {
-            std::cerr << "EvdevInput: Failed to grab fd " << fd << " (" << strerror(errno) << "). Device will be ignored." << std::endl;
+            LOG_ERROR("EvdevInput: Failed to grab fd ", fd, " (", strerror(errno), "). Device will be ignored.");
         }
     }
     
@@ -259,7 +260,7 @@ void EvdevInput::grabKeyboard() {
         grabbed = true;
         // We don't replace deviceFds because we need them for passive monitoring when ungrabbed.
         // But the event loop should ideally only care about grabbed ones when in grabbed mode.
-        std::cout << "EvdevInput: Keyboard grabbed (Exclusive Mode on " << successfullyGrabbed.size() << " devices)" << std::endl;
+        LOG_INFO("EvdevInput: Keyboard grabbed (Exclusive Mode on ", successfullyGrabbed.size(), " devices)");
     }
 }
 
@@ -287,7 +288,7 @@ void EvdevInput::ungrabKeyboard() {
 
     for (int fd : deviceFds) {
         if (ioctl(fd, EVIOCGRAB, 0) != 0) {
-            std::cerr << "EvdevInput: Failed to release grab on fd " << fd << ": " << strerror(errno) << std::endl;
+            LOG_ERROR("EvdevInput: Failed to release grab on fd ", fd, ": ", strerror(errno));
         }
     }
     grabbed = false;
@@ -309,7 +310,7 @@ void EvdevInput::ungrabKeyboard() {
     altPressed = false;
     ctrlPressed = false;
 
-    std::cout << "EvdevInput: Keyboard released. (KeyNav is still running, press Activation Key to return or Ctrl+C to quit)" << std::endl;
+    LOG_INFO("EvdevInput: Keyboard released. (KeyNav is still running, press Activation Key to return or Ctrl+C to quit)");
 }
 
 void EvdevInput::eventLoop() {
@@ -352,12 +353,12 @@ void EvdevInput::eventLoop() {
                         if (grabbed) {
                             // In grabbed mode, we process all keys and they are NOT seen by the OS
                             if (pressed) {
-                                std::cout << "EvdevInput: Key Pressed: " << code << " (grabbed)" << std::endl;
+                                LOG_INFO("EvdevInput: Key Pressed: ", code, " (grabbed)");
                                 if (code == KEY_ESC) {
                                     engine->onDeactivate();
                                 }
                                 else if (code == KEY_C && ctrlPressed) {
-                                    std::cout << "EvdevInput: Ctrl+C detected while grabbed. Exiting..." << std::endl;
+                                    LOG_INFO("EvdevInput: Ctrl+C detected while grabbed. Exiting...");
                                     engine->onExit();
                                 }
                                 else if (code == KEY_BACKSPACE) {
@@ -404,7 +405,7 @@ void EvdevInput::eventLoop() {
                             // In this state, the OS also sees these keys! 
                             // We only look for the trigger to START grabbing.
                             if (pressed && (code == KEY_RIGHTCTRL || (altPressed && code == KEY_G))) {
-                                std::cout << "EvdevInput: Activation Key Detected (" << (code == KEY_RIGHTCTRL ? "RIGHT CTRL" : "Alt+G") << ")" << std::endl;
+                                LOG_INFO("EvdevInput: Activation Key Detected (", (code == KEY_RIGHTCTRL ? "RIGHT CTRL" : "Alt+G"), ")");
                                 
                                 // Before grabbing, we MUST "release" the activation keys in the OS's mind
                                 // otherwise they will be stuck "down" forever because we grab before the "up" event.

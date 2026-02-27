@@ -3,6 +3,7 @@
 #include "WaylandOverlay.h"
 #include "X11Input.h"
 #include "EvdevInput.h"
+#include "../../core/Logger.h"
 #include <iostream>
 #include <poll.h>
 #include <cstring>
@@ -10,135 +11,202 @@
 #include <string>
 #include <glib.h>
 #include <X11/extensions/XTest.h>
+#include <X11/extensions/Xrandr.h>
 #include <X11/keysym.h>
+#include <sys/signalfd.h>
+#include <signal.h>
+#include <unistd.h>
 
 int x11ErrorHandler(Display* d, XErrorEvent* e) {
     char buffer[1024];
     XGetErrorText(d, e->error_code, buffer, 1024);
-    std::cerr << "X11 Error: " << buffer << " (Opcode: " << (int)e->request_code << ")" << std::endl;
+    LOG_ERROR("X11 Error: ", buffer, " (Opcode: ", (int)e->request_code, ")");
     return 0;
 }
 
 X11Platform::X11Platform(Engine* e, bool evdev) : engine(e), useEvdev(evdev) {}
 
 X11Platform::~X11Platform() {
-    if (input) delete input;
-    if (overlay) delete overlay;
+    if (sigFd >= 0) close(sigFd);
     if (display) XCloseDisplay(display);
 }
 
+void X11Platform::setupSignalHandling() {
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGINT);
+    sigaddset(&mask, SIGTERM);
+
+    // Block the signals so they don't hit their default asynchronous handlers
+    if (sigprocmask(SIG_BLOCK, &mask, nullptr) == -1) {
+        LOG_ERROR("X11Platform: sigprocmask failed");
+    }
+
+    // Create a file descriptor that we can poll to receive these signals synchronously
+    sigFd = signalfd(-1, &mask, SFD_NONBLOCK | SFD_CLOEXEC);
+    if (sigFd == -1) {
+        LOG_ERROR("X11Platform: signalfd failed");
+    }
+}
+
+void X11Platform::processSignal() {
+    if (sigFd < 0) return;
+    struct signalfd_siginfo fdsi;
+    ssize_t s = read(sigFd, &fdsi, sizeof(struct signalfd_siginfo));
+    if (s != sizeof(struct signalfd_siginfo)) return;
+
+    if (fdsi.ssi_signo == SIGINT || fdsi.ssi_signo == SIGTERM) {
+        LOG_INFO("X11Platform: Received shutdown signal (", fdsi.ssi_signo, "). Exiting gracefully...");
+        if (input) input->ungrabKeyboard();
+        isRunning = false;
+    }
+}
+
 bool X11Platform::initialize() {
-    XInitThreads(); // Critical for multi-threaded X11 access (Evdev thread -> Engine -> Overlay)
+    XInitThreads();
     XSetErrorHandler(x11ErrorHandler);
 
     display = XOpenDisplay(NULL);
     if (!display) {
-        std::cerr << "X11Platform: Cannot open display" << std::endl;
+        LOG_ERROR("X11Platform: Cannot open display");
         return false;
     }
     screen = DefaultScreen(display);
+
+    setupSignalHandling();
 
     const char* sessionType = std::getenv("XDG_SESSION_TYPE");
     const char* waylandDisplay = std::getenv("WAYLAND_DISPLAY");
     const bool runningOnWayland = (waylandDisplay && waylandDisplay[0] != '\0') ||
                                   (sessionType && std::string(sessionType) == "wayland");
 
-    // Create Overlay backend
     if (useEvdev && runningOnWayland) {
-        waylandOverlay = new WaylandOverlay();
+        waylandOverlay = std::make_unique<WaylandOverlay>();
 
         if (waylandOverlay->initialize()) {
-            overlay = waylandOverlay;
+            overlay = waylandOverlay.get();
             usingWaylandOverlay = true;
-            std::cout << "Using Native Wayland Layer-Shell Overlay" << std::endl;
+            LOG_INFO("Using Native Wayland Layer-Shell Overlay");
         } else {
-            delete waylandOverlay;
-            waylandOverlay = nullptr;
-            std::cerr << "Wayland overlay initialization failed." << std::endl;
+            waylandOverlay.reset();
+            LOG_ERROR("Wayland overlay initialization failed. Your compositor might not support wlr-layer-shell.");
+            LOG_ERROR("ACTION REQUIRED: Try running without the --evdev flag to use the X11/XWayland fallback mode.");
             return false;
         }
     }
 
     if (!overlay) {
-        x11Overlay = new X11Overlay(display, screen);
+        x11Overlay = std::make_unique<X11Overlay>(display, screen);
         if (!x11Overlay->initialize()) return false;
-        overlay = x11Overlay;
+        overlay = x11Overlay.get();
     }
 
     if (useEvdev) {
-        std::cout << "Using Evdev Input Backend (Requires sudo/uinput)" << std::endl;
-        input = new EvdevInput(engine);
+        LOG_INFO("Using Evdev Input Backend (Requires sudo/uinput)");
+        input = std::make_unique<EvdevInput>(engine);
     } else {
-        std::cout << "Using X11 Input Backend" << std::endl;
-        input = new X11Input(display, engine);
+        LOG_INFO("Using X11 Input Backend");
+        input = std::make_unique<X11Input>(display, engine);
     }
     
     int w = DisplayWidth(display, screen);
     int h = DisplayHeight(display, screen);
     if (!input->initialize(w, h)) {
-        std::cerr << "Failed to initialize input backend." << std::endl;
-        // Don't fail completely, maybe overlay works
-        // return false; 
+        LOG_ERROR("Failed to initialize input backend.");
+        // Strict Init Contract: If primary input fails, KeyNav shouldn't run.
+        return false; 
     }
 
-    // Connect to Engine
     engine->setPlatform(this);
     engine->setOverlay(overlay);
-    engine->setInput(input);
+    engine->setInput(input.get());
 
     return true;
 }
 
+void X11Platform::processX11Events() {
+    XEvent event;
+    while (XPending(display)) {
+        XNextEvent(display, &event);
+
+        if (event.type == Expose && x11Overlay) {
+            x11Overlay->handleExpose();
+        } 
+        else if (event.type == KeyPress || event.type == KeyRelease) {
+            if (!useEvdev) {
+                static_cast<X11Input*>(input.get())->handleEvent(event);
+            }
+        }
+    }
+}
+
 void X11Platform::run() {
     isRunning = true;
-    XEvent event;
 
     std::string activationKey = useEvdev ? "Alt+G or RIGHT CTRL" : "Alt+G";
-    std::cout << "KeyNav Platform Running (" << activationKey << " to Activate)..." << std::endl;
+    LOG_INFO("KeyNav Platform Running (", activationKey, " to Activate)...");
 
     int x11Fd = ConnectionNumber(display);
 
-    while (isRunning) {
-        if (usingWaylandOverlay) {
-            while (g_main_context_iteration(nullptr, false)) {}
+    if (usingWaylandOverlay) {
+        // Integrate X11 events into GLib main loop
+        GIOChannel* x11Channel = g_io_channel_unix_new(x11Fd);
+        g_io_add_watch(x11Channel, G_IO_IN, [](GIOChannel*, GIOCondition, gpointer data) -> gboolean {
+            auto* platform = static_cast<X11Platform*>(data);
+            platform->processX11Events();
+            return G_SOURCE_CONTINUE;
+        }, this);
+        g_io_channel_unref(x11Channel);
+
+        // Integrate Signals into GLib main loop
+        if (sigFd >= 0) {
+            GIOChannel* sigChannel = g_io_channel_unix_new(sigFd);
+            g_io_add_watch(sigChannel, G_IO_IN, [](GIOChannel*, GIOCondition, gpointer data) -> gboolean {
+                auto* platform = static_cast<X11Platform*>(data);
+                platform->processSignal();
+                if (!platform->isRunning) g_main_context_wakeup(nullptr);
+                return G_SOURCE_CONTINUE;
+            }, this);
+            g_io_channel_unref(sigChannel);
         }
 
-        // Use poll to wait for X events OR timeout, allowing us to check isRunning
-        struct pollfd pfd;
-        pfd.fd = x11Fd;
-        pfd.events = POLLIN;
-
-        int pollTimeoutMs = usingWaylandOverlay ? 10 : 100;
-        int ret = poll(&pfd, 1, pollTimeoutMs);
-        if (ret < 0) {
-            if (errno != EINTR) std::cerr << "X11Platform: poll error: " << strerror(errno) << std::endl;
-            break; 
+        while (isRunning) {
+            g_main_context_iteration(nullptr, true); // True = Blocking wait
         }
+    } else {
+        // Native Poll loop for X11 without GLib
+        while (isRunning) {
+            struct pollfd pfds[2];
+            pfds[0].fd = x11Fd;
+            pfds[0].events = POLLIN;
+            
+            pfds[1].fd = sigFd;
+            pfds[1].events = POLLIN;
 
-        // Process all pending X events
-        while (XPending(display)) {
-            XNextEvent(display, &event);
+            int ret = poll(pfds, 2, -1); // Infinite wait (-1), wake on input or signal!
+            if (ret < 0) {
+                if (errno != EINTR) LOG_ERROR("X11Platform: poll error: ", strerror(errno));
+                break; 
+            }
 
-            // Route Events
-            if (event.type == Expose && x11Overlay) {
-                x11Overlay->handleExpose();
-            } 
-            else if (event.type == KeyPress || event.type == KeyRelease) {
-                // Only route to X11Input if we are using it
-                if (!useEvdev) {
-                    static_cast<X11Input*>(input)->handleEvent(event);
-                }
+            if (pfds[0].revents & POLLIN) {
+                processX11Events();
+            }
+            if (sigFd >= 0 && (pfds[1].revents & POLLIN)) {
+                processSignal();
             }
         }
     }
 
-    std::cout << "X11Platform: Run loop exiting..." << std::endl;
-    // Final cleanup of modifiers on exit
+    LOG_INFO("X11Platform: Run loop exiting...");
     releaseModifiers();
 }
 
 void X11Platform::exit() {
     isRunning = false;
+    if (usingWaylandOverlay) {
+        g_main_context_wakeup(nullptr);
+    }
 }
 
 void X11Platform::getScreenSize(int& w, int& h) {
@@ -151,7 +219,40 @@ void X11Platform::getScreenSize(int& w, int& h) {
         }
     }
 
-    // Get the actual physical screen size from the root window
+    if (!usingWaylandOverlay) {
+        Window root = RootWindow(display, screen);
+        int monitorCount = 0;
+        XRRMonitorInfo* monitors = XRRGetMonitors(display, root, True, &monitorCount);
+        if (monitors && monitorCount > 0) {
+            int rootX = 0, rootY = 0, winX = 0, winY = 0;
+            unsigned int mask = 0;
+            Window rootReturn = 0, childReturn = 0;
+            bool havePointer = XQueryPointer(display, root, &rootReturn, &childReturn, &rootX, &rootY, &winX, &winY, &mask);
+
+            int selectedIndex = -1;
+            if (havePointer) {
+                for (int i = 0; i < monitorCount; ++i) {
+                    if (rootX >= monitors[i].x && rootX < (monitors[i].x + monitors[i].width) &&
+                        rootY >= monitors[i].y && rootY < (monitors[i].y + monitors[i].height)) {
+                        selectedIndex = i;
+                        break;
+                    }
+                }
+            }
+            if (selectedIndex < 0) {
+                for (int i = 0; i < monitorCount; ++i) {
+                    if (monitors[i].primary) { selectedIndex = i; break; }
+                }
+            }
+            if (selectedIndex < 0) selectedIndex = 0;
+
+            w = monitors[selectedIndex].width;
+            h = monitors[selectedIndex].height;
+            XRRFreeMonitors(monitors);
+            return;
+        }
+    }
+
     w = DisplayWidth(display, screen);
     h = DisplayHeight(display, screen);
 }
@@ -160,7 +261,6 @@ void X11Platform::clickMouse(int button, int count) {
     if (useEvdev && input) {
         input->clickMouse(button, count);
     } else {
-        // X11 button mapping: 1=Left, 2=Middle, 3=Right
         for (int i = 0; i < count; ++i) {
             XTestFakeButtonEvent(display, button, True, CurrentTime);
             XTestFakeButtonEvent(display, button, False, CurrentTime);
@@ -170,9 +270,6 @@ void X11Platform::clickMouse(int button, int count) {
 }
 
 void X11Platform::releaseModifiers() {
-    // Release Alt and Ctrl keys via XTest to ensure no stuck modifiers
-    // This is especially needed after an evdev grab which may have masked release events.
-    
     KeySym keys[] = { 
         XK_Alt_L, XK_Alt_R, 
         XK_Control_L, XK_Control_R, 

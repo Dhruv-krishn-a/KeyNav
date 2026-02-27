@@ -7,6 +7,7 @@
 #include "../../core/Overlay.h"
 #include <X11/Xlib.h>
 #include <atomic>
+#include <memory>
 
 class X11Overlay; // Forward decl
 class X11Input;   // Forward decl
@@ -24,15 +25,12 @@ public:
     // Release modifiers using XTest (useful when ungrabbing evdev)
     void releaseModifiers() override;
 
-    // Call from signal handler to ensure ungrab. 
-    // MUST BE ASYNC-SIGNAL-SAFE (no X11 calls).
-    void emergencyExit() {
-        if (input) input->ungrabKeyboard();
-        isRunning = false;
-    }
-
     void getScreenSize(int& w, int& h) override;
     
+    void processX11Events();
+    void setupSignalHandling();
+    void processSignal();
+
     void moveCursor(int x, int y) override {
         if (useEvdev && input) {
             int w = DisplayWidth(display, screen);
@@ -52,14 +50,15 @@ private:
     Engine* engine;
     Display* display = nullptr;
     int screen = 0;
+    int sigFd = -1;
     std::atomic<bool> isRunning{false};
     bool useEvdev = false;
     bool usingWaylandOverlay = false;
 
     Overlay* overlay = nullptr;
-    X11Overlay* x11Overlay = nullptr;
-    WaylandOverlay* waylandOverlay = nullptr;
-    Input* input = nullptr;        // Abstract Input
+    std::unique_ptr<X11Overlay> x11Overlay;
+    std::unique_ptr<WaylandOverlay> waylandOverlay;
+    std::unique_ptr<Input> input;
 };
 
 #endif // X11PLATFORM_H

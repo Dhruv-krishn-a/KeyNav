@@ -2,7 +2,8 @@
 #include "Platform.h"
 #include "Overlay.h"
 #include "Input.h"
-#include <iostream>
+#include "Config.h"
+#include "Logger.h"
 #include <chrono>
 #include <thread>
 #include <cmath>
@@ -13,8 +14,8 @@ Engine::~Engine() {}
 
 void Engine::initialize() {
     state.mode = EngineMode::Inactive;
-    state.gridRows = 11;
-    state.gridCols = 11;
+    state.gridRows = Config::LEVEL0_GRID_ROWS;
+    state.gridCols = Config::LEVEL0_GRID_COLS;
     state.recursionDepth = 0;
 }
 
@@ -29,8 +30,8 @@ void Engine::onActivate() {
     
     state.mode = EngineMode::Level0_FirstChar;
     state.firstChar = '\0';
-    state.gridRows = 11;
-    state.gridCols = 11;
+    state.gridRows = Config::LEVEL0_GRID_ROWS;
+    state.gridCols = Config::LEVEL0_GRID_COLS;
     state.recursionDepth = 0;
 
     // Start with full root-screen rect.
@@ -44,7 +45,7 @@ void Engine::onActivate() {
     // Overlay geometry can settle asynchronously
     Rect bestBounds = state.currentRect;
     double bestArea = bestBounds.w * bestBounds.h;
-    for (int i = 0; i < 12; ++i) {
+    for (int i = 0; i < Config::OVERLAY_SETTLE_MAX_RETRIES; ++i) {
         Rect candidate;
         if (overlay->getBounds(candidate) && candidate.w > 1.0 && candidate.h > 1.0) {
             const double area = candidate.w * candidate.h;
@@ -53,7 +54,7 @@ void Engine::onActivate() {
                 bestBounds = candidate;
             }
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(8));
+        std::this_thread::sleep_for(Config::OVERLAY_SETTLE_POLL_INTERVAL);
     }
 
     auto nearValue = [](double a, double b, double eps) {
@@ -62,10 +63,10 @@ void Engine::onActivate() {
 
     const double fullArea = state.currentRect.w * state.currentRect.h;
     const double areaRatio = (fullArea > 0.0) ? (bestArea / fullArea) : 0.0;
-    const bool touchesXEdge = nearValue(bestBounds.x, 0.0, 3.0) ||
-                              nearValue(bestBounds.x + bestBounds.w, (double)w, 3.0);
-    const bool touchesYEdge = nearValue(bestBounds.y, 0.0, 3.0) ||
-                              nearValue(bestBounds.y + bestBounds.h, (double)h, 3.0);
+    const bool touchesXEdge = nearValue(bestBounds.x, 0.0, Config::OVERLAY_BOUNDS_EPSILON) ||
+                              nearValue(bestBounds.x + bestBounds.w, (double)w, Config::OVERLAY_BOUNDS_EPSILON);
+    const bool touchesYEdge = nearValue(bestBounds.y, 0.0, Config::OVERLAY_BOUNDS_EPSILON) ||
+                              nearValue(bestBounds.y + bestBounds.h, (double)h, Config::OVERLAY_BOUNDS_EPSILON);
     const bool plausibleMonitorRect = (areaRatio >= 0.90) || (touchesXEdge && touchesYEdge);
     if (plausibleMonitorRect) {
         state.currentRect = bestBounds;
@@ -84,18 +85,18 @@ void Engine::onActivate() {
 
     input->grabKeyboard();
     platform->releaseModifiers();
-    std::cout << "Engine: Activated" << std::endl;
+    LOG_INFO("Engine: Activated");
 }
 
 void Engine::onDeactivate() {
     if (state.mode == EngineMode::Inactive) return;
     
-    std::cout << "Engine: Deactivating..." << std::endl;
+    LOG_INFO("Engine: Deactivating...");
     state.mode = EngineMode::Inactive;
     overlay->hide();
     input->ungrabKeyboard();
     platform->releaseModifiers();
-    std::cout << "Engine: Deactivated" << std::endl;
+    LOG_INFO("Engine: Deactivated");
 }
 
 void Engine::onExit() {
@@ -141,9 +142,9 @@ void Engine::onChar(char c, bool shiftPressed) {
             int cursorY = (int)(state.currentRect.y + state.currentRect.h / 2);
             platform->moveCursor(cursorX, cursorY);
             
-            // Switch to 6x6 recursive mode
-            state.gridRows = 6;
-            state.gridCols = 6;
+            // Switch to level 1 recursive mode
+            state.gridRows = Config::LEVEL1_GRID_ROWS;
+            state.gridCols = Config::LEVEL1_GRID_COLS;
             state.mode = EngineMode::Level1_Recursive;
             state.recursionDepth = 0;
             updateOverlay();
@@ -213,12 +214,12 @@ void Engine::onUndo() {
             state.history.pop_back();
             state.recursionDepth--;
             
-            // If we popped back to the initial full screen, revert to Level0 11x11
+            // If we popped back to the initial full screen, revert to Level0
             if (state.history.empty() || state.recursionDepth < 0) {
                 state.mode = EngineMode::Level0_FirstChar;
                 state.firstChar = '\0';
-                state.gridRows = 11;
-                state.gridCols = 11;
+                state.gridRows = Config::LEVEL0_GRID_ROWS;
+                state.gridCols = Config::LEVEL0_GRID_COLS;
                 state.recursionDepth = 0;
             }
         }
@@ -234,7 +235,7 @@ void Engine::onUndo() {
 void Engine::onClick(int button, int count, bool deactivate) {
     if (state.mode == EngineMode::Inactive) return;
 
-    std::cout << "Engine: Click Request - Button: " << button << " Count: " << count << std::endl;
+    LOG_INFO("Engine: Click Request - Button: ", button, " Count: ", count);
 
     int centerX = (int)(state.currentRect.x + state.currentRect.w / 2);
     int centerY = (int)(state.currentRect.y + state.currentRect.h / 2);
@@ -244,10 +245,10 @@ void Engine::onClick(int button, int count, bool deactivate) {
         onDeactivate(); // Ungrabs the keyboard and hides overlay
         // Critical: Give GTK/Wayland a moment to process the keyboard ungrab
         // before we inject the mouse click, otherwise GTK ignores the click.
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(Config::POST_UNGRAB_DELAY);
     } else {
         if (overlay) overlay->hide();
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        std::this_thread::sleep_for(Config::POST_UNGRAB_DELAY);
     }
 
     platform->clickMouse(button, count);

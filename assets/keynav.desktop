@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=KeyNav
+Comment=Keyboard-driven mouse navigation for Linux
+Exec=keynav --evdev
+Icon=keynav
+Terminal=false
+Type=Application
+Categories=Utility;Accessibility;
+Keywords=keyboard;mouse;navigation;accessibility;

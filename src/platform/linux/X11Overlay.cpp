@@ -1,5 +1,7 @@
 #include "X11Overlay.h"
+#include "../../core/Config.h"
 #include <iostream>
+#include "../../core/Logger.h"
 #include <algorithm>
 #include <cstring>
 #include <cstdlib>
@@ -9,34 +11,17 @@
 
 namespace {
 
-struct Rgba {
-    double r;
-    double g;
-    double b;
-    double a;
-};
-
 double clampValue(double value, double minValue, double maxValue) {
     return std::max(minValue, std::min(value, maxValue));
 }
 
-Rgba withAlpha(const Rgba& color, double alpha) {
+Config::Rgba withAlpha(const Config::Rgba& color, double alpha) {
     return {color.r, color.g, color.b, alpha};
 }
 
-Rgba tileColorForIndex(int index) {
-    static const std::array<Rgba, 9> palette = {{
-        {0.91, 0.30, 0.27, 0.0}, // coral
-        {0.95, 0.56, 0.20, 0.0}, // amber
-        {0.95, 0.78, 0.27, 0.0}, // gold
-        {0.36, 0.76, 0.44, 0.0}, // green
-        {0.22, 0.72, 0.73, 0.0}, // cyan
-        {0.25, 0.48, 0.86, 0.0}, // blue
-        {0.48, 0.42, 0.87, 0.0}, // indigo
-        {0.79, 0.37, 0.81, 0.0}, // violet
-        {0.88, 0.36, 0.53, 0.0}  // rose
-    }};
-    return palette[index % palette.size()];
+Config::Rgba tileColorForIndex(int index) {
+    if (Config::PALETTE.empty()) return {0.0, 0.0, 0.0, 1.0};
+    return Config::PALETTE[index % Config::PALETTE.size()];
 }
 
 std::string labelForIndex(int index, int cols) {
@@ -129,7 +114,7 @@ void X11Overlay::createWindow() {
 
     XVisualInfo vinfo;
     if (!XMatchVisualInfo(display, screen, 32, TrueColor, &vinfo)) {
-        std::cerr << "No 32-bit visual found" << std::endl;
+        LOG_ERROR("No 32-bit visual found");
         return;
     }
 
@@ -435,7 +420,7 @@ void X11Overlay::renderLocked() {
             const double x1 = drawRect.x + (drawRect.w * (c + 1)) / gridCols;
 
             const int index = r * gridCols + c;
-            const Rgba fill = withAlpha(tileColorForIndex(index), 0.30);
+            const Config::Rgba fill = withAlpha(tileColorForIndex(index), Config::OVERLAY_FILL_ALPHA);
 
             cairo_rectangle(cr, x0, y0, std::max(1.0, x1 - x0), std::max(1.0, y1 - y0));
             cairo_set_source_rgba(cr, fill.r, fill.g, fill.b, fill.a);

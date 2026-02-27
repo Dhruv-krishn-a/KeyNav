@@ -28,6 +28,7 @@ include_directories(${GTK_LAYER_SHELL_INCLUDE_DIRS})
 set(SOURCES
     src/main.cpp
     src/core/Engine.cpp
+    src/core/Config.cpp
     src/platform/linux/X11Platform.cpp
     src/platform/linux/X11Overlay.cpp
     src/platform/linux/WaylandOverlay.cpp
@@ -48,3 +49,21 @@ target_link_libraries(KeyNav
     ${GTK_LAYER_SHELL_LIBRARIES}
     pthread
 )
+
+# Testing
+include(FetchContent)
+FetchContent_Declare(
+  googletest
+  URL https://github.com/google/googletest/archive/03597a01ee50ed33e9dfd640b249b4be3799d395.zip
+)
+# For Windows: Prevent overriding the parent project's compiler/linker settings
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googletest)
+
+enable_testing()
+
+add_executable(EngineTest tests/EngineTest.cpp src/core/Engine.cpp src/core/Config.cpp src/core/Logger.h)
+target_include_directories(EngineTest PRIVATE src)
+target_link_libraries(EngineTest gtest_main pthread)
+
+add_test(NAME EngineTest COMMAND EngineTest)
